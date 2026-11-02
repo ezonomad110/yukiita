@@ -39,6 +39,13 @@ function fresh() { return { time: 20, hearts: 2, score: 0, combo: 5, maxCombo: 5
   eq(s.time, 19.5, 'collision costs 0.5 seconds');
   eq(s.speed, 13.5, 'collision cuts speed to 45%');
 }
+/* rock hit: slowdown ONLY — hearts and time untouched */
+{
+  const s = fresh(); L.applyRockHit(s);
+  eq(s.hearts, 2, 'rock hit costs no heart');
+  eq(s.time, 20, 'rock hit costs no time');
+  eq(s.speed, 13.5, 'rock hit cuts speed to 45%');
+}
 /* near miss: combo grows, score = 100*combo cumulative, burst fills, cap 100 */
 {
   const s = fresh(); s.combo = 0; s.maxCombo = 0;

@@ -197,6 +197,11 @@ var YukiitaLogic = (function () {
     s.speed *= COLLISION_SPEED_FACTOR;
     return s;
   }
+  /* Rocks only slow you down: no heart, no time penalty. */
+  function applyRockHit(s) {
+    s.speed *= COLLISION_SPEED_FACTOR;
+    return s;
+  }
   function addNearMiss(s) {
     s.combo += 1;
     if (s.combo > s.maxCombo) s.maxCombo = s.combo;
@@ -270,6 +275,7 @@ var YukiitaLogic = (function () {
     MAX_HEARTS: MAX_HEARTS,
     applyCheckpoint: applyCheckpoint,
     applyCollision: applyCollision,
+    applyRockHit: applyRockHit,
     addNearMiss: addNearMiss,
     TUNING_KEYS: TUNING_KEYS,
     formatTuning: formatTuning,
@@ -465,6 +471,7 @@ const CHUNK = 40;
 const chunks = new Map();
 function makeTree(){
   const g = new THREE.Group();
+  g.userData.obKind = 'tree';
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.1, 6), MAT.trunk); trunk.position.y = 0.55; g.add(trunk);
   for (let i = 0; i < 3; i++) {
     const c = new THREE.Mesh(new THREE.ConeGeometry(1.5 - i * 0.35, 1.7, 7), MAT.pine);
@@ -474,10 +481,11 @@ function makeTree(){
 }
 function makeRock(){
   const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.9, 0), MAT.rock);
-  m.position.y = 0.5; m.scale.y = 0.75; return m;
+  m.position.y = 0.5; m.scale.y = 0.75; m.userData.obKind = 'rock'; return m;
 }
 function makeSkier(){
   const g = new THREE.Group();
+  g.userData.obKind = 'skier';
   const b = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.0, 0.32), MAT.skier); b.position.y = 1.05; g.add(b);
   const h = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), MAT.skin); h.position.y = 1.8; g.add(h);
   const bd = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 1.5), MAT.pants); bd.position.y = 0.06; g.add(bd);
@@ -543,7 +551,7 @@ function buildChunk(idx){
     }
   }
   /* --- scattered singles: sparse in speed zones, dense in slalom --- */
-  const n = zone === 'speed' ? Math.floor(rand() * 2) : 3 + Math.floor(rand() * 3);
+  const n = zone === 'speed' ? Math.floor(rand() * 2) : 2 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -885,11 +893,19 @@ function update(dt){
         o.userData.passed = true;
         if (S.grounded && dx < 1.05) {
           if (!inBurst && S.invulnTime <= 0) {
-            L.applyCollision(S); S.invulnTime = 1.2; carveSt.chain = 0; sndCrash();
-            emitSpray(player.position.x, player.position.y, player.position.z, 22, 5);
-            popup('CRASH! -0.5秒');
-            if (S.hearts <= 0) { endRun('hearts'); return; }
-            if (S.time <= 0) { S.time = 0; endRun('time'); return; }
+            if (o.userData.obKind === 'rock') {
+              /* rocks: slowdown only — no heart, no time penalty */
+              L.applyRockHit(S); S.invulnTime = 0.5; sndCrash();
+              emitSpray(player.position.x, player.position.y, player.position.z, 10, 3);
+              popup('ROCK! 減速');
+            } else {
+              /* trees & skiers: a real crash — lose a heart */
+              L.applyCollision(S); S.invulnTime = 1.2; carveSt.chain = 0; sndCrash();
+              emitSpray(player.position.x, player.position.y, player.position.z, 22, 5);
+              popup('CRASH! -0.5秒');
+              if (S.hearts <= 0) { endRun('hearts'); return; }
+              if (S.time <= 0) { S.time = 0; endRun('time'); return; }
+            }
           }
         } else if (dx < 2.3) {
           L.addNearMiss(S); sndNear(); popup('NEAR MISS ×' + S.combo);
