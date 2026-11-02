@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.4</p>
+  <p class="ver">v3.5</p>
 </div>
 
 <!-- Result -->
@@ -895,7 +895,7 @@ function updateSpray(dt){
 /* Powder cloud system (steep zone): big soft particles that hang in
    the air and dissipate — colour fades toward the fog colour over
    each particle's life, which reads as the cloud thinning out. */
-const POWDER_N = 420;
+const POWDER_N = 900;
 const powderPos = new Float32Array(POWDER_N * 3);
 const powderCol = new Float32Array(POWDER_N * 3);
 const powderVel = new Float32Array(POWDER_N * 3);
@@ -904,7 +904,7 @@ const powderMax = new Float32Array(POWDER_N);
 const powderGeo = new THREE.BufferGeometry();
 powderGeo.setAttribute('position', new THREE.BufferAttribute(powderPos, 3));
 powderGeo.setAttribute('color', new THREE.BufferAttribute(powderCol, 3));
-const powder = new THREE.Points(powderGeo, new THREE.PointsMaterial({ size: 0.6, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false }));
+const powder = new THREE.Points(powderGeo, new THREE.PointsMaterial({ size: 1.15, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false }));
 powder.frustumCulled = false; scene.add(powder);
 let powderIdx = 0;
 for (let i = 0; i < POWDER_N; i++) { powderPos[i*3+1] = -9999; }
@@ -1203,7 +1203,7 @@ function update(dt){
     S.jumpY += S.jumpV * dt;
     if (S.jumpY <= 0) { S.jumpY = 0; S.grounded = true; emitSpray(player.position.x, player.position.y, player.position.z, 10, 3);
       /* landing in the powder zone blows out a ring of snow */
-      if (steepW(S.dist) > 0.25) for (let k = 0; k < 14; k++) { const an = k / 14 * Math.PI * 2; emitPowder(player.position.x + Math.cos(an) * 0.5, player.position.y + 0.15, player.position.z + Math.sin(an) * 0.5, Math.cos(an) * 2.4, 1.4 + Math.random() * 1.6, Math.sin(an) * 2.4); }
+      if (steepW(S.dist) > 0.25) for (let k = 0; k < 14; k++) { const an = k / 14 * Math.PI * 2; emitPowder(player.position.x + Math.cos(an) * 0.5, player.position.y + 0.5, player.position.z + Math.sin(an) * 0.5, Math.cos(an) * 3, 2 + Math.random() * 2, Math.sin(an) * 3); }
     }
   }
 
@@ -1289,21 +1289,25 @@ function update(dt){
   const swNow = steepW(S.dist);
   if (S.grounded && swNow > 0.15 && S.speed > 30) {
     const px2 = player.position.x, py2 = player.position.y, pz2 = player.position.z;
-    const nTail = Math.round(3 + swNow * 9);
+    /* Powder has to EXPLODE upward: spawned at board level it stays
+       buried under the sunken rider and the terrain and reads as
+       nothing. Spawn above the surface, throw it high and back
+       toward the camera, with puffs big enough to billow. */
+    const nTail = Math.round(4 + swNow * 8);
     for (let k = 0; k < nTail; k++) {
-      emitPowder(px2 + (Math.random() - 0.5) * 0.7, py2 + 0.15 + Math.random() * 0.3, pz2 + 0.9,
-        (Math.random() - 0.5) * 2.4, 1.5 + Math.random() * 2.8, 2.5 + Math.random() * 4.5);
+      emitPowder(px2 + (Math.random() - 0.5) * 2.2, py2 + 0.5 + Math.random() * 0.9, pz2 + 0.9 + Math.random() * 1.6,
+        (Math.random() - 0.5) * 6.4, 2.5 + Math.random() * 3.5, 3.5 + Math.random() * 5.5);
     }
     if (Math.abs(S.latV) > 4) {
       const nSide = Math.round(Math.abs(S.latV) * 0.35 * swNow);
       for (let k = 0; k < nSide; k++) {
         const sd = k % 2 === 0 ? -1 : 1;
-        emitPowder(px2 + sd * 0.45, py2 + 0.12, pz2 + 0.4,
-          sd * (1.6 + Math.random() * 2.6), 1.2 + Math.random() * 2.2, 1.5 + Math.random() * 2.5);
+        emitPowder(px2 + sd * 0.5, py2 + 0.45 + Math.random() * 0.5, pz2 + 0.4,
+          sd * (2.2 + Math.random() * 3), 2.2 + Math.random() * 2.8, 2 + Math.random() * 3);
       }
     }
     if (Math.random() < swNow * 0.85) {
-      emitPowder(px2 + (Math.random() - 0.5) * 11, py2 + 0.4 + Math.random() * 2.4, pz2 - 4 - Math.random() * 7,
+      emitPowder(px2 + (Math.random() - 0.5) * 11, py2 + 0.8 + Math.random() * 2.6, pz2 - 4 - Math.random() * 7,
         0, 0.2, 1.2);
     }
     emitSpray(px2, py2 + 0.05, pz2 + 0.9, Math.round(swNow * 5), 3.2);
