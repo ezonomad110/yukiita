@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.3</p>
+  <p class="ver">v3.4</p>
 </div>
 
 <!-- Result -->
@@ -892,6 +892,48 @@ function updateSpray(dt){
   sprayGeo.attributes.position.needsUpdate = true;
 }
 
+/* Powder cloud system (steep zone): big soft particles that hang in
+   the air and dissipate — colour fades toward the fog colour over
+   each particle's life, which reads as the cloud thinning out. */
+const POWDER_N = 420;
+const powderPos = new Float32Array(POWDER_N * 3);
+const powderCol = new Float32Array(POWDER_N * 3);
+const powderVel = new Float32Array(POWDER_N * 3);
+const powderLife = new Float32Array(POWDER_N);
+const powderMax = new Float32Array(POWDER_N);
+const powderGeo = new THREE.BufferGeometry();
+powderGeo.setAttribute('position', new THREE.BufferAttribute(powderPos, 3));
+powderGeo.setAttribute('color', new THREE.BufferAttribute(powderCol, 3));
+const powder = new THREE.Points(powderGeo, new THREE.PointsMaterial({ size: 0.6, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false }));
+powder.frustumCulled = false; scene.add(powder);
+let powderIdx = 0;
+for (let i = 0; i < POWDER_N; i++) { powderPos[i*3+1] = -9999; }
+function emitPowder(x, y, z, vx, vy, vz){
+  const i = powderIdx; powderIdx = (powderIdx + 1) % POWDER_N;
+  powderPos[i*3] = x; powderPos[i*3+1] = y; powderPos[i*3+2] = z;
+  powderVel[i*3] = vx; powderVel[i*3+1] = vy; powderVel[i*3+2] = vz;
+  powderMax[i] = powderLife[i] = 0.9 + Math.random() * 0.8;
+}
+function updatePowder(dt){
+  for (let i = 0; i < POWDER_N; i++) {
+    if (powderLife[i] <= 0) continue;
+    powderLife[i] -= dt;
+    if (powderLife[i] <= 0) { powderPos[i*3+1] = -9999; continue; }
+    const drag = Math.max(0, 1 - 1.6 * dt);
+    powderVel[i*3] *= drag; powderVel[i*3+2] *= drag;
+    powderVel[i*3+1] = powderVel[i*3+1] * drag - 2.2 * dt;
+    powderPos[i*3] += powderVel[i*3] * dt;
+    powderPos[i*3+1] += powderVel[i*3+1] * dt;
+    powderPos[i*3+2] += powderVel[i*3+2] * dt;
+    const f = powderLife[i] / powderMax[i];   /* 1 fresh -> 0 spent */
+    powderCol[i*3]     = 0.66 + 0.34 * f;
+    powderCol[i*3 + 1] = 0.78 + 0.22 * f;
+    powderCol[i*3 + 2] = 0.93 + 0.07 * f;
+  }
+  powderGeo.attributes.position.needsUpdate = true;
+  powderGeo.attributes.color.needsUpdate = true;
+}
+
 /* Spur (track groove left in the snow): a ribbon of segment quads
    rebuilt each frame from recent grounded positions, fading out
    toward the tail. One draw call, no per-frame allocation. */
@@ -1103,12 +1145,15 @@ function update(dt){
      cruise cap (top speed without accelerating). Above the current cap
      there is no positive acceleration, only a smooth glide-down drag,
      so releasing tuck at 240 glides toward cruise instead of snapping. */
-  /* The steep zone raises the cap by up to +30% at its heart, so the
-     slope force becomes real extra speed — but it does NOT stack with
-     BURST (the two multipliers together pushed the cap to 1.75x and
-     the zone turned into a reaction test at 1,300+ km/h). */
-  const capNow = L.effectiveCap(tuning, input.tuck, inBurst) * (inBurst ? 1 : 1 + 0.3 * steepW(S.dist));
+  /* The steep zone raises the cap by up to +12% at its heart — it
+     does NOT stack with BURST (the two multipliers together once
+     pushed the cap to 1.75x, a 1,300+ km/h reaction test). The
+     bonus used to be +30%, but combined with the slope force the
+     powder zone ran away; deep snow should also push back, so the
+     grounded drag below grows with steepW. */
+  const capNow = L.effectiveCap(tuning, input.tuck, inBurst) * (inBurst ? 1 : 1 + 0.12 * steepW(S.dist));
   let a = -S.speed * 0.02;                               /* mild drag */
+  if (S.grounded) a -= S.speed * 0.25 * steepW(S.dist);  /* powder resistance */
   /* Slope force from the rolling profile: pitches steeper than the
      base grade feed speed, rises bleed it — pumping over the whoops. */
   a += ((groundY(S.dist - 3) - groundY(S.dist + 3)) / 6 - SLOPE) * 170;
@@ -1156,7 +1201,10 @@ function update(dt){
   if (!S.grounded) {
     S.jumpV -= tuning.gravity * dt;
     S.jumpY += S.jumpV * dt;
-    if (S.jumpY <= 0) { S.jumpY = 0; S.grounded = true; emitSpray(player.position.x, player.position.y, player.position.z, 10, 3); }
+    if (S.jumpY <= 0) { S.jumpY = 0; S.grounded = true; emitSpray(player.position.x, player.position.y, player.position.z, 10, 3);
+      /* landing in the powder zone blows out a ring of snow */
+      if (steepW(S.dist) > 0.25) for (let k = 0; k < 14; k++) { const an = k / 14 * Math.PI * 2; emitPowder(player.position.x + Math.cos(an) * 0.5, player.position.y + 0.15, player.position.z + Math.sin(an) * 0.5, Math.cos(an) * 2.4, 1.4 + Math.random() * 1.6, Math.sin(an) * 2.4); }
+    }
   }
 
   /* --- gates --- */
@@ -1233,12 +1281,32 @@ function update(dt){
     const n = Math.min(10, Math.round(2 + Math.abs(S.latV) * 0.18 + S.speed * 0.04));
     emitSpray(player.position.x - Math.sign(S.latV) * 0.3, player.position.y, player.position.z + 0.6, n, 2.2 + Math.abs(S.latV) * 0.06);
   }
-  /* --- deep-powder plume: in the steep zone the rider runs sunken
-     (by design — see render) and drags a constant rooster tail, so
-     the burial reads as ploughing powder rather than a glitch --- */
+  /* --- deep-powder storm: in the steep zone the rider runs sunken
+     (by design — see render) and the air itself fills with powder:
+     a rooster tail behind, bursts off both edges when carving, and
+     loose snow drifting in the air ahead, so the whole screen reads
+     as ploughing through deep powder --- */
   const swNow = steepW(S.dist);
-  if (S.grounded && swNow > 0.25 && S.speed > 40) {
-    emitSpray(player.position.x, player.position.y + 0.05, player.position.z + 0.9, Math.round(swNow * 5), 3.2);
+  if (S.grounded && swNow > 0.15 && S.speed > 30) {
+    const px2 = player.position.x, py2 = player.position.y, pz2 = player.position.z;
+    const nTail = Math.round(3 + swNow * 9);
+    for (let k = 0; k < nTail; k++) {
+      emitPowder(px2 + (Math.random() - 0.5) * 0.7, py2 + 0.15 + Math.random() * 0.3, pz2 + 0.9,
+        (Math.random() - 0.5) * 2.4, 1.5 + Math.random() * 2.8, 2.5 + Math.random() * 4.5);
+    }
+    if (Math.abs(S.latV) > 4) {
+      const nSide = Math.round(Math.abs(S.latV) * 0.35 * swNow);
+      for (let k = 0; k < nSide; k++) {
+        const sd = k % 2 === 0 ? -1 : 1;
+        emitPowder(px2 + sd * 0.45, py2 + 0.12, pz2 + 0.4,
+          sd * (1.6 + Math.random() * 2.6), 1.2 + Math.random() * 2.2, 1.5 + Math.random() * 2.5);
+      }
+    }
+    if (Math.random() < swNow * 0.85) {
+      emitPowder(px2 + (Math.random() - 0.5) * 11, py2 + 0.4 + Math.random() * 2.4, pz2 - 4 - Math.random() * 7,
+        0, 0.2, 1.2);
+    }
+    emitSpray(px2, py2 + 0.05, pz2 + 0.9, Math.round(swNow * 5), 3.2);
   }
 }
 
@@ -1400,7 +1468,7 @@ function loop(now){
   requestAnimationFrame(loop);
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.05) dt = 0.05;                 /* clamp tab-switch jumps */
-  if (S.mode !== 'pause') { update(dt); updateSpray(dt); }
+  if (S.mode !== 'pause') { update(dt); updateSpray(dt); updatePowder(dt); }
   render(); renderHUD();
 }
 requestAnimationFrame(loop);
