@@ -95,5 +95,33 @@ eq(L.TUNING_KEYS, ['maxSpeed', 'accel', 'cruise', 'carve', 'brake', 'jumpPower',
   eq(L.updateCarve(st, 0, 4.5), 0, 'no input does not chain');
 }
 
+/* course sections: 900m alternating, section 0 = speed */
+{
+  eq(L.zoneTypeAt(0), 'speed', 'zone at 0 is speed');
+  eq(L.zoneTypeAt(899), 'speed', 'zone at 899 is speed');
+  eq(L.zoneTypeAt(900), 'slalom', 'zone at 900 is slalom');
+  eq(L.zoneTypeAt(1800), 'speed', 'zone at 1800 is speed');
+  eq(L.zoneTypeAt(8999), 'slalom', 'zone at 8999 is slalom');
+}
+/* gate offsets per zone: speed swings wide, slalom stays central, deterministic */
+{
+  const sp = []; for (let i = 0; i < 8; i++) sp.push(L.gateOffset(400, i));
+  eq(sp.every(o => Math.abs(o) >= 11), true, 'speed-zone gate offsets all |off| >= 11');
+  const sl = []; for (let i = 0; i < 6; i++) sl.push(L.gateOffset(1000, i));
+  eq(sl.every(o => Math.abs(o) <= 5), true, 'slalom-zone gate offsets all |off| <= 5');
+  eq(L.gateOffset(400, 0), L.gateOffset(400, 8), 'speed gate offset cycle repeats deterministically');
+  eq(L.gateOffset(1000, 0), L.gateOffset(1000, 6), 'slalom gate offset cycle repeats deterministically');
+  eq(L.gateOffset(400, 3), L.gateOffset(400, 3), 'gate offset is deterministic for same inputs');
+}
+/* next-gate marker direction */
+{
+  eq(L.markerDir(0, false), 'down', 'marker centered points down');
+  eq(L.markerDir(0.5, false), 'down', 'marker on-screen points down');
+  eq(L.markerDir(-2, false), 'left', 'marker far left points left');
+  eq(L.markerDir(2, false), 'right', 'marker far right points right');
+  eq(L.markerDir(-3, true), 'left', 'marker behind-left points left');
+  eq(L.markerDir(3, true), 'right', 'marker behind-right points right');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

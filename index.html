@@ -36,6 +36,14 @@
   #hud-time .t { font-size:44px; font-weight:900; text-shadow:0 2px 12px rgba(0,0,0,.45); font-variant-numeric:tabular-nums; }
   #hud-time .t.low { color:#ff5d5d; }
   #hud-time .next { font-size:12px; letter-spacing:.08em; opacity:.95; text-shadow:0 1px 6px rgba(0,0,0,.6); }
+  #hud-zone { display:inline-block; margin-top:5px; font-size:11px; font-weight:800; letter-spacing:.18em;
+    padding:3px 10px; border-radius:999px; background:rgba(56,120,255,.55); text-shadow:0 1px 4px rgba(0,0,0,.5); }
+  #hud-zone.slalom { background:rgba(255,90,60,.6); }
+  /* ---------- Next-gate arrow marker (DOM, visible through fog) ---------- */
+  #gate-marker { position:fixed; z-index:11; pointer-events:none; text-align:center; color:#ffd94d;
+    transform:translate(-50%,-50%); text-shadow:0 2px 10px rgba(0,0,0,.65); }
+  #gate-arrow { font-size:34px; font-weight:900; line-height:1; }
+  #gate-label { font-size:11px; font-weight:800; letter-spacing:.08em; margin-top:1px; white-space:nowrap; }
   #hud-left { position:absolute; top:calc(12px + env(safe-area-inset-top)); left:14px; }
   #hud-score { font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; text-shadow:0 2px 8px rgba(0,0,0,.5); }
   #hud-hearts { font-size:18px; margin-top:2px; letter-spacing:2px; }
@@ -97,6 +105,7 @@
   <div id="hud-time">
     <div class="t" id="time-val">30.0</div>
     <div class="next" id="next-val"></div>
+    <div id="hud-zone">SPEED ZONE</div>
   </div>
   <button id="btn-pause">II</button>
   <div id="hud-right">
@@ -107,6 +116,7 @@
   <div id="popup"></div>
 </div>
 <div id="countdown" class="hidden"></div>
+<div id="gate-marker" class="hidden"><div id="gate-arrow">▼</div><div id="gate-label">GATE 0m</div></div>
 
 <!-- Touch controls -->
 <div id="touch" class="hidden">
@@ -210,6 +220,34 @@ var YukiitaLogic = (function () {
   function effectiveCap(t, tuck, burst) {
     return burst ? t.maxSpeed * 1.35 : (tuck ? t.maxSpeed * 1.12 : t.cruise);
   }
+  /* Course sections: 900m each, alternating. Section 0 (0-899m) is a
+     speed zone, section 1 a slalom (obstacle) zone, and so on. */
+  var SECTION_LEN = 900;
+  function zoneTypeAt(dist) {
+    var sec = Math.floor(Math.max(0, dist) / SECTION_LEN);
+    return sec % 2 === 0 ? "speed" : "slalom";
+  }
+  /* Gate offsets depend on the gate's zone. The second argument is the
+     gate's ordinal WITHIN its zone (0-based count of prior gates in the
+     same zone), so each zone cycles through its own pattern:
+     speed zones swing wide (all |off| >= 11), slalom zones stay near
+     the centre line (all |off| <= 5). */
+  var SPEED_GATE_OFFSETS = [14, -14, 18, -18, 11, -11, 16, -16];
+  var SLALOM_GATE_OFFSETS = [0, 4, -3, 5, -5, 0];
+  function gateOffset(dist, zoneIndex) {
+    var cyc = zoneTypeAt(dist) === "speed" ? SPEED_GATE_OFFSETS : SLALOM_GATE_OFFSETS;
+    var i = ((zoneIndex % cyc.length) + cyc.length) % cyc.length;
+    return cyc[i];
+  }
+  /* Next-gate marker direction. ndcX is the projected NDC x when the
+     anchor is in front of the camera; when behind, the caller passes
+     the view-space x (whose sign gives the gate's true side). */
+  function markerDir(ndcX, behind) {
+    if (behind) return ndcX < 0 ? "left" : "right";
+    if (ndcX < -1) return "left";
+    if (ndcX > 1) return "right";
+    return "down";
+  }
   /* Rhythm carve: st = {chain, dir, time}. Call with the current carve
      direction sign and elapsed run time; returns the new chain count when
      an alternation lands within 1.6s of the previous one, else 0. */
@@ -238,6 +276,10 @@ var YukiitaLogic = (function () {
     isGatePass: isGatePass,
     gateSideLabel: gateSideLabel,
     effectiveCap: effectiveCap,
+    SECTION_LEN: SECTION_LEN,
+    zoneTypeAt: zoneTypeAt,
+    gateOffset: gateOffset,
+    markerDir: markerDir,
     updateCarve: updateCarve
   };
 })();
@@ -325,12 +367,23 @@ const SLOPE = 0.16;                       /* height drop per metre travelled */
 const GATE_EVERY_MIN = 350, GATE_EVERY_MAX = 450;
 const GATE_DISTANCES = [];
 { let d = 400; let i = 0; while (d < COURSE_LEN - 120) { GATE_DISTANCES.push(d); d += 350 + ((i * 53) % 100); i++; } }
-/* Gates sit at varying lateral offsets so the player must steer for them. */
-const GATE_OFFSETS = [14, -14, 6, -18, 18, 0, -9, 11];
-function gateOffsetAt(i){ return GATE_OFFSETS[i % GATE_OFFSETS.length]; }
+/* Gate offsets depend on the gate's zone (see L.gateOffset): speed-zone
+   gates swing wide, slalom-zone gates stay near the centre. Offsets are
+   indexed by each gate's ordinal within its own zone and precomputed
+   into a dist -> offset map used by gates and obstacle placement. */
+const GATE_OFF_MAP = new Map();
+const GATE_ZONE_MAP = new Map();
+{
+  let sp = 0, sl = 0;
+  for (const d of GATE_DISTANCES) {
+    const zone = L.zoneTypeAt(d);
+    const ord = zone === 'speed' ? sp++ : sl++;
+    GATE_OFF_MAP.set(d, L.gateOffset(d, ord));
+    GATE_ZONE_MAP.set(d, zone);
+  }
+}
 function gateOffsetForDist(dist){
-  const i = GATE_DISTANCES.indexOf(dist);
-  return i >= 0 ? gateOffsetAt(i) : 0;
+  return GATE_OFF_MAP.has(dist) ? GATE_OFF_MAP.get(dist) : 0;
 }
 
 function centerX(dist){ return Math.sin(dist * 0.004) * 14 + Math.sin(dist * 0.0013 + 1.7) * 10; }
@@ -431,10 +484,24 @@ function makeSkier(){
   g.userData.slowSkier = true;
   return g;
 }
-/* Wall rows: every 5th chunk gets a row of obstacles spanning the course
-   with ONE ~9m gap. Gap centres are deterministic and consecutive rows
-   differ by >=10m so the player must really steer. */
-const WALL_EVERY = 5, WALL_PHASE = 2;
+/* Wall rows (SLALOM zones only): about every 4th chunk gets a row of
+   obstacles spanning the course with ONE ~9m gap. Gap centres are
+   deterministic and consecutive rows differ by >=10m so the player
+   must really steer. */
+const WALL_EVERY = 4, WALL_PHASE = 2;
+function isWallChunk(idx){
+  if (idx % WALL_EVERY !== WALL_PHASE) return false;
+  const start = idx * CHUNK;
+  if (start >= COURSE_LEN) return false;
+  if (L.zoneTypeAt(start + CHUNK / 2) !== 'slalom') return false;
+  const rowDist = start + CHUNK / 2;
+  return !GATE_DISTANCES.some(gd => Math.abs(gd - rowDist) < 15);
+}
+function wallOrdinalForChunk(idx){
+  let n = 0;
+  for (let j = WALL_PHASE; j < idx; j += WALL_EVERY) if (isWallChunk(j)) n++;
+  return n;
+}
 const wallGapCache = [];
 function wallGapOrdinal(ord){
   while (wallGapCache.length <= ord) {
@@ -463,21 +530,20 @@ function buildChunk(idx){
     obj.userData.passed = false;
     g.add(obj); items.push(obj);
   }
-  /* --- wall row (deterministic per chunk) --- */
+  /* --- section type for this chunk (from its mid distance) --- */
+  const zone = L.zoneTypeAt(start + CHUNK / 2);
+  /* --- wall row (slalom zones only, deterministic per chunk) --- */
   let hasWall = false, rowDist = start + CHUNK / 2, gapOff = 0;
-  if (idx % WALL_EVERY === WALL_PHASE && start < COURSE_LEN) {
-    const nearGate = GATE_DISTANCES.some(gd => Math.abs(gd - rowDist) < 15);
-    if (!nearGate) {
-      hasWall = true;
-      gapOff = wallGapOrdinal((idx - WALL_PHASE) / WALL_EVERY);
-      for (let off = -22; off <= 22.01; off += 5.5) {
-        if (Math.abs(off - gapOff) <= 4.5) continue;   /* the gap */
-        addItem(rowDist, Math.round(off * 10) / 10, rand() < 0.6 ? makeTree() : makeRock());
-      }
+  if (isWallChunk(idx)) {
+    hasWall = true;
+    gapOff = wallGapOrdinal(wallOrdinalForChunk(idx));
+    for (let off = -22; off <= 22.01; off += 5.5) {
+      if (Math.abs(off - gapOff) <= 4.5) continue;   /* the gap */
+      addItem(rowDist, Math.round(off * 10) / 10, rand() < 0.6 ? makeTree() : makeRock());
     }
   }
-  /* --- scattered singles across the full width --- */
-  const n = 2 + Math.floor(rand() * 3);
+  /* --- scattered singles: sparse in speed zones, dense in slalom --- */
+  const n = zone === 'speed' ? Math.floor(rand() * 2) : 4 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -520,7 +586,8 @@ function layoutChunk(idx){
 const gates = [];
 for (let i = 0; i < GATE_DISTANCES.length; i++) {
   const dist = GATE_DISTANCES[i];
-  const off = gateOffsetAt(i);
+  const off = GATE_OFF_MAP.get(dist);
+  const zone = GATE_ZONE_MAP.get(dist);
   const g = new THREE.Group();
   const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleR); p1.position.set(-4, 1.3, 0);
   const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleB); p2.position.set(4, 1.3, 0);
@@ -529,7 +596,7 @@ for (let i = 0; i < GATE_DISTANCES.length; i++) {
   g.add(p1, p2, bar);
   g.position.set(centerX(dist) + off, groundY(dist), -dist);
   scene.add(g);
-  gates.push({ dist, off, group: g, passed: false });
+  gates.push({ dist, off, zone, group: g, passed: false });
 }
 /* Goal lodge gate */
 {
@@ -600,7 +667,8 @@ const S = {
   time: 30, hearts: 3, score: 0, combo: 0, maxCombo: 0, burst: 0,
   dist: 0, speed: 0, maxSpeedSeen: 0,
   latX: 0, latV: 0, jumpY: 0, jumpV: 0, grounded: true,
-  burstTime: 0, invulnTime: 0, countT: 0, popupT: 0, runTime: 0
+  burstTime: 0, invulnTime: 0, countT: 0, popupT: 0, runTime: 0,
+  lastZone: 'speed'
 };
 /* Rhythm-carve chain state (see L.updateCarve). */
 const carveSt = { chain: 0, dir: 0, time: -9 };
@@ -661,6 +729,7 @@ function resetRun(){
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
   S.burstTime = 0; S.invulnTime = 0; S.runTime = 0;
+  S.lastZone = 'speed';
   carveSt.chain = 0; carveSt.dir = 0; carveSt.time = -9;
   for (const g of gates) g.passed = false;
   for (const [, g] of chunks) for (const o of g.userData.items) o.userData.passed = false;
@@ -719,6 +788,13 @@ function update(dt){
   S.time -= dt;
   S.runTime += dt;
   if (S.time <= 0) { S.time = 0; endRun('time'); return; }
+
+  /* --- section crossing announcement --- */
+  const zoneNow = L.zoneTypeAt(S.dist);
+  if (zoneNow !== S.lastZone) {
+    S.lastZone = zoneNow;
+    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : 'SLALOM ZONE — 障害物を避けろ');
+  }
 
   /* --- speed --- */
   const inBurst = S.burstTime > 0;
@@ -868,16 +944,58 @@ function render(){
 }
 
 /* ================= HUD ================= */
+/* Next-gate arrow marker: a DOM element (immune to fog) that tracks the
+   next unpassed gate — or the goal lodge — so the player can start
+   steering long before the gate itself becomes visible. */
+const _mv = new THREE.Vector3(), _mw = new THREE.Vector3();
+function updateGateMarker(){
+  const el = $('gate-marker');
+  if (S.mode !== 'run' && S.mode !== 'count') { el.classList.add('hidden'); return; }
+  const g = nextGate();
+  let tx, ty, tz, label;
+  if (g) {
+    tx = centerX(g.dist) + g.off; ty = groundY(g.dist) + 7; tz = -g.dist;
+    label = 'GATE ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm';
+  } else {
+    if (S.dist >= COURSE_LEN) { el.classList.add('hidden'); return; }
+    tx = centerX(COURSE_LEN); ty = groundY(COURSE_LEN) + 9; tz = -COURSE_LEN;
+    label = 'GOAL ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
+  }
+  _mv.set(tx, ty, tz);
+  _mw.copy(_mv).applyMatrix4(camera.matrixWorldInverse);
+  const behind = _mw.z > 0;
+  const proj = _mv.project(camera);
+  const dir = L.markerDir(behind ? _mw.x : proj.x, behind);
+  const W = window.innerWidth, H = window.innerHeight;
+  let x, y;
+  if (dir === 'down') {
+    x = THREE.MathUtils.clamp((proj.x * 0.5 + 0.5) * W, 28, W - 28);
+    y = THREE.MathUtils.clamp((-proj.y * 0.5 + 0.5) * H, 64, H * 0.55);
+    $('gate-arrow').textContent = '▼';
+  } else if (dir === 'left') {
+    x = 28; y = 96; $('gate-arrow').textContent = '◀';
+  } else {
+    x = W - 28; y = 96; $('gate-arrow').textContent = '▶';
+  }
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  $('gate-label').textContent = label;
+  el.classList.remove('hidden');
+}
 function renderHUD(){
-  if (S.mode !== 'run' && S.mode !== 'count' && S.mode !== 'pause') return;
+  if (S.mode !== 'run' && S.mode !== 'count' && S.mode !== 'pause') { $('gate-marker').classList.add('hidden'); return; }
+  updateGateMarker();
   $('hud-score').textContent = Math.floor(S.score).toLocaleString();
   $('hud-hearts').textContent = '❤️'.repeat(Math.max(0, S.hearts)) + '🖤'.repeat(Math.max(0, 3 - S.hearts));
   $('hud-combo').textContent = S.combo >= 2 ? 'COMBO ×' + S.combo : '';
   const tv = $('time-val');
   tv.textContent = S.time.toFixed(1);
   tv.classList.toggle('low', S.time < 10);
+  const zone = L.zoneTypeAt(S.dist);
+  const hz = $('hud-zone');
+  hz.textContent = zone === 'speed' ? 'SPEED ZONE ・ スピード区間' : 'SLALOM ZONE ・ 障害物区間';
+  hz.classList.toggle('slalom', zone === 'slalom');
   const g = nextGate();
-  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +9秒';
+  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +9秒';
   else $('next-val').textContent = '次は GOAL ・ ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
   $('hud-speed').innerHTML = Math.round(S.speed * 3.6) + '<small> km/h</small>';
   $('burst-bar').style.width = (S.burstTime > 0 ? 100 : S.burst) + '%';
