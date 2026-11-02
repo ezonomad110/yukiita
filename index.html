@@ -137,7 +137,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v2.5</p>
+  <p class="ver">v2.6</p>
 </div>
 
 <!-- Result -->
@@ -409,6 +409,17 @@ function racingLineAt(d){
 
 function centerX(dist){ return Math.sin(dist * 0.004) * 14 + Math.sin(dist * 0.0013 + 1.7) * 10; }
 function groundY(dist){ return -dist * SLOPE; }
+/* Rolling relief OUTSIDE the ride corridor: exactly 0 for |x| <= 27,
+   full by |x| >= 42, so gameplay ground truth never changes. A pure
+   function of (dist, x), so recycled ground segments join seamlessly. */
+function bumpAt(dist, x){
+  const ax = Math.abs(x);
+  if (ax <= 27) return 0;
+  const t = Math.min(1, (ax - 27) / 15);
+  const s = t * t * (3 - 2 * t);
+  const n = Math.sin(dist * 0.018 + x * 0.11) * 1.4 + Math.sin(dist * 0.043 - x * 0.06) * 0.8 + Math.sin(x * 0.21 + dist * 0.008) * 0.5;
+  return n * 1.3 * s;
+}
 function seededRand(seed){ let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 const renderer = new THREE.WebGLRenderer({ canvas: $('game-canvas'), antialias: true });
@@ -420,40 +431,90 @@ scene.fog = new THREE.Fog(0xa8c8ee, 80, 380);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 500);
 scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a7296, 1.05));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(30, 60, 20); scene.add(sun);
-const distant = new THREE.Mesh(new THREE.ConeGeometry(90, 70, 5), new THREE.MeshLambertMaterial({ color: 0xe8f2fc }));
-distant.position.set(-120, 10, -260); scene.add(distant);
-const distant2 = distant.clone(); distant2.position.set(140, 4, -320); distant2.scale.setScalar(1.3); scene.add(distant2);
+/* Faceted low-poly mountain range + drifting low-poly clouds */
+const peaks = new THREE.Group();
+{
+  const peakMats = [0xe9f3fd, 0xc3d9ef, 0xdcecfb].map(c => new THREE.MeshLambertMaterial({ color: c }));
+  const defs = [[-250, 150, 120], [-170, 95, 80], [-95, 180, 140], [-20, 120, 95], [55, 200, 150], [130, 110, 85], [205, 165, 125], [275, 130, 100], [0, 240, 170]];
+  defs.forEach((d, i) => {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(d[1], d[2], 5 + (i % 2)), peakMats[i % 3]);
+    m.position.set(d[0], d[2] / 2 - 16, -12 - (i % 3) * 34);
+    m.rotation.y = i * 1.3;
+    peaks.add(m);
+  });
+  scene.add(peaks);
+}
+const clouds = new THREE.Group();
+{
+  const cm = new THREE.MeshBasicMaterial({ color: 0xf4f9ff, transparent: true, opacity: 0.92, fog: false });
+  const crand = seededRand(777);
+  for (let i = 0; i < 7; i++) {
+    const cl = new THREE.Group();
+    const nBlob = 2 + Math.floor(crand() * 2);
+    for (let j = 0; j < nBlob; j++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(7 + crand() * 7, 7, 6), cm);
+      b.position.set(j * 9 - nBlob * 4, crand() * 2.5, crand() * 4);
+      b.scale.y = 0.42;
+      cl.add(b);
+    }
+    cl.position.set(-240 + crand() * 480, 46 + crand() * 30, -20 - crand() * 110);
+    clouds.add(cl);
+  }
+  scene.add(clouds);
+}
 
 const MAT = {
-  snow:  new THREE.MeshLambertMaterial({ color: 0xf4f8ff }),
+  snow:  new THREE.MeshLambertMaterial({ vertexColors: true }),
   trunk: new THREE.MeshLambertMaterial({ color: 0x6b4a2b }),
   pine:  new THREE.MeshLambertMaterial({ color: 0x2e6b46 }),
+  pine2: new THREE.MeshLambertMaterial({ color: 0x3d8560 }),
   rock:  new THREE.MeshLambertMaterial({ color: 0x8b95a3 }),
   poleR: new THREE.MeshBasicMaterial({ color: 0xff4040 }),
   poleB: new THREE.MeshBasicMaterial({ color: 0x3878ff }),
-  board: new THREE.MeshLambertMaterial({ color: 0xff7847 }),
-  body:  new THREE.MeshLambertMaterial({ color: 0x28418c }),
+  board: new THREE.MeshLambertMaterial({ color: 0xff7d1f }),
+  jacket: new THREE.MeshLambertMaterial({ color: 0xd8342c }),
+  cloth: new THREE.MeshLambertMaterial({ color: 0x1d2026 }),
+  helmet: new THREE.MeshLambertMaterial({ color: 0xf2f4f6 }),
   pants: new THREE.MeshLambertMaterial({ color: 0x22262e }),
   skin:  new THREE.MeshLambertMaterial({ color: 0xf2c79b })
 };
 
 /* Ground segments, recycled */
 const SEG_LEN = 50, SEG_COUNT = 9;
-function makeGroundGeo(){
-  /* Ribbon following the slope: local z in [-SEG_LEN/2, +SEG_LEN/2],
-     dist = mid - z, so vertex height = z * SLOPE matches groundY(dist). */
-  const rows = 10, verts = [], idx = [];
+const GROUND_COLS = [-70, -56, -45, -37, -31, -27, -18, -9, 0, 9, 18, 27, 31, 37, 45, 56, 70];
+function makeGroundGeo(mid){
+  /* Faceted ribbon for the segment whose centre distance is `mid`
+     (local z in [-SEG_LEN/2, +SEG_LEN/2], dist = mid - z, so base
+     height z * SLOPE matches groundY). Relief (bumpAt) and snow
+     colour patches are pure functions of (dist, x); the corridor
+     stays perfectly flat. Non-indexed + flat normals = low-poly facets. */
+  const rows = 10, verts = [], cols = [], idx = [];
+  const cWhite = [0.965, 0.98, 1.0], cShade = [0.78, 0.86, 0.96];
   for (let r = 0; r <= rows; r++) {
     const z = -SEG_LEN / 2 + (SEG_LEN * r) / rows;
-    verts.push(-45, z * SLOPE, z, 45, z * SLOPE, z);
+    const dist = mid - z;
+    for (let c = 0; c < GROUND_COLS.length; c++) {
+      const x = GROUND_COLS[c];
+      const b = bumpAt(dist, x);
+      verts.push(x, z * SLOPE + b, z);
+      const patch = 0.5 + 0.5 * Math.sin(dist * 0.11 + x * 0.33) * Math.sin(dist * 0.047 - x * 0.21);
+      const m = Math.max(0, Math.min(1, 0.5 + patch * 0.5 + b * 0.06));
+      cols.push(cShade[0] + (cWhite[0] - cShade[0]) * m, cShade[1] + (cWhite[1] - cShade[1]) * m, cShade[2] + (cWhite[2] - cShade[2]) * m);
+    }
   }
+  const W = GROUND_COLS.length;
   for (let r = 0; r < rows; r++) {
-    const a = r * 2, b = a + 1, c = a + 2, d = a + 3;
-    idx.push(a, b, c, b, d, c);
+    for (let c = 0; c < W - 1; c++) {
+      const a = r * W + c, b = a + 1, d = a + W, e = d + 1;
+      idx.push(a, d, b, b, d, e);
+    }
   }
-  const geo = new THREE.BufferGeometry();
+  let geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  geo.setIndex(idx); geo.computeVertexNormals();
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  geo.setIndex(idx);
+  geo = geo.toNonIndexed();
+  geo.computeVertexNormals();
   return geo;
 }
 const segments = [];
@@ -461,7 +522,8 @@ const edgePoleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.7, 5);
 const edgeFlagGeo = new THREE.BoxGeometry(0.75, 0.45, 0.05);
 for (let i = 0; i < SEG_COUNT; i++) {
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(makeGroundGeo(), MAT.snow));
+  g.userData.builtFor = null;
+  g.add(new THREE.Mesh(makeGroundGeo(25), MAT.snow));
   /* Course-edge markers at +/-26 so the widened course width reads visually. */
   for (const side of [-26, 26]) {
     for (const zo of [-12.5, 12.5]) {
@@ -478,6 +540,12 @@ function layoutSegment(g, startDist){
   const mid = startDist + SEG_LEN / 2;
   g.position.set(centerX(mid), groundY(mid), -mid);
   g.rotation.y = -Math.atan((centerX(mid + 5) - centerX(mid - 5)) / 10);
+  if (g.userData.builtFor !== startDist) {
+    g.userData.builtFor = startDist;
+    const mesh = g.children[0];
+    mesh.geometry.dispose();
+    mesh.geometry = makeGroundGeo(mid);
+  }
 }
 
 /* Obstacles, pooled per 40m chunk */
@@ -589,6 +657,23 @@ function buildChunk(idx){
     const kind = rand();
     addItem(dist, off, kind < 0.7 ? makeTree() : makeRock());
   }
+  /* --- scenery outside the corridor (pure decoration, no collision):
+     trees and boulders scattered on the relief so the valley feels alive --- */
+  const decor = [];
+  const nd = 3 + Math.floor(rand() * 3);
+  for (let i = 0; i < nd; i++) {
+    const dist = start + 4 + rand() * (CHUNK - 8);
+    const side = rand() < 0.5 ? -1 : 1;
+    const off = side * (29.5 + rand() * 26);
+    const obj = rand() < 0.78 ? makeTree() : makeRock();
+    obj.scale.setScalar(0.9 + rand() * 1.1);
+    if (obj.userData.obKind === 'tree' && rand() < 0.4) {
+      obj.children.forEach(c => { if (c.material === MAT.pine) c.material = MAT.pine2; });
+    }
+    obj.userData.dist = dist; obj.userData.off = off;
+    g.add(obj); decor.push(obj);
+  }
+  g.userData.decor = decor;
   g.userData.items = items;
   scene.add(g); return g;
 }
@@ -603,6 +688,11 @@ function layoutChunk(idx){
     const lz = -(o.userData.dist - mid);
     o.position.x = lx; o.position.z = lz;
     o.position.y = (groundY(o.userData.dist) - groundY(mid)) + Math.cos(Math.atan((centerX(o.userData.dist + 2) - centerX(o.userData.dist - 2)) / 4)) * 0;
+  }
+  for (const o of g.userData.decor || []) {
+    o.position.x = centerX(o.userData.dist) - centerX(mid) + o.userData.off;
+    o.position.z = -(o.userData.dist - mid);
+    o.position.y = (groundY(o.userData.dist) - groundY(mid)) + bumpAt(o.userData.dist, o.userData.off);
   }
   return g;
 }
@@ -637,20 +727,55 @@ for (let i = 0; i < GATE_DISTANCES.length; i++) {
   scene.add(g);
 }
 
-/* Player (primitives, seen from behind) */
+/* Player — concept A rider (seen from behind): red/black jacket,
+   white helmet, backpack, graphic orange board. Built from primitives
+   but proportioned and colour-blocked to read at game distance. */
 const player = new THREE.Group();
 {
-  const board = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.07, 1.65), MAT.board); board.position.y = 0.1; player.add(board);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.55, 0.2), MAT.pants); legL.position.set(0, 0.42, -0.38); legL.rotation.x = 0.35; player.add(legL);
-  const legR = legL.clone(); legR.position.z = 0.38; legR.rotation.x = -0.3; player.add(legR);
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.78, 0.3), MAT.body); body.position.set(0, 1.05, 0); body.rotation.x = 0.22; player.add(body);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.62, 0.13), MAT.body); armL.position.set(-0.42, 1.05, 0); armL.rotation.z = 0.5; player.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.42; armR.rotation.z = -0.5; player.add(armR);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 10), MAT.skin); head.position.set(0, 1.66, 0.06); player.add(head);
-  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.23, 0.16, 10), new THREE.MeshLambertMaterial({ color: 0xffd94d }));
-  hat.position.set(0, 1.8, 0.06); player.add(hat);
+  /* board + canvas-drawn top graphic (orange, black peaks) */
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 512;
+  const cx2 = cv.getContext('2d');
+  cx2.fillStyle = '#ff7d1f'; cx2.fillRect(0, 0, 128, 512);
+  cx2.fillStyle = '#20242c';
+  cx2.beginPath(); cx2.moveTo(64, 170); cx2.lineTo(116, 300); cx2.lineTo(12, 300); cx2.closePath(); cx2.fill();
+  cx2.beginPath(); cx2.moveTo(28, 225); cx2.lineTo(62, 300); cx2.lineTo(-6, 300); cx2.closePath(); cx2.fill();
+  cx2.fillRect(0, 36, 128, 16); cx2.fillRect(0, 460, 128, 16);
+  cx2.fillStyle = '#ffffff';
+  cx2.beginPath(); cx2.moveTo(64, 196); cx2.lineTo(78, 226); cx2.lineTo(50, 226); cx2.closePath(); cx2.fill();
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.07, 1.7), MAT.board); board.position.y = 0.1; player.add(board);
+  const top = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 1.66), new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(cv) }));
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.139; player.add(top);
+  /* boots */
+  for (const bz of [-0.38, 0.38]) {
+    const bt = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.34), MAT.cloth);
+    bt.position.set(0, 0.19, bz); player.add(bt);
+  }
+  /* baggy black pants */
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.58, 0.25), MAT.pants); legL.position.set(0, 0.48, -0.38); legL.rotation.x = 0.32; player.add(legL);
+  const legR = legL.clone(); legR.position.z = 0.38; legR.rotation.x = -0.28; player.add(legR);
+  /* jacket: red torso, black shoulder yoke, hood, red arms, black cuffs */
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.78, 0.33), MAT.jacket); body.position.set(0, 1.08, 0); body.rotation.x = 0.2; player.add(body);
+  const yoke = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.26, 0.35), MAT.cloth); yoke.position.set(0, 1.42, 0.02); yoke.rotation.x = 0.2; player.add(yoke);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.16), MAT.jacket); hood.position.set(0, 1.48, 0.23); player.add(hood);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.62, 0.15), MAT.jacket); armL.position.set(-0.44, 1.08, 0); armL.rotation.z = 0.5; player.add(armL);
+  const armR = armL.clone(); armR.position.x = 0.44; armR.rotation.z = -0.5; player.add(armR);
+  for (const sx of [-0.57, 0.57]) {
+    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.16), MAT.cloth);
+    cuff.position.set(sx, 0.8, 0); player.add(cuff);
+  }
+  /* backpack with red flap */
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.52, 0.17), MAT.cloth); pack.position.set(0, 1.1, 0.28); pack.rotation.x = 0.2; player.add(pack);
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.19), MAT.jacket); flap.position.set(0, 1.35, 0.29); flap.rotation.x = 0.2; player.add(flap);
+  /* white helmet, goggle strap, goggles resting on top */
+  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), MAT.skin); neck.position.set(0, 1.56, 0.02); player.add(neck);
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), MAT.helmet); helm.position.set(0, 1.74, 0.04); player.add(helm);
+  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.256, 0.256, 0.09, 12), MAT.cloth); strap.position.set(0, 1.76, 0.04); player.add(strap);
+  const gog = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.09, 0.12), MAT.cloth); gog.position.set(0, 1.92, -0.1); player.add(gog);
   scene.add(player);
 }
+/* Soft blob shadow grounding the player (cheaper than shadow maps) */
+const blobShadow = new THREE.Mesh(new THREE.CircleGeometry(0.62, 20), new THREE.MeshBasicMaterial({ color: 0x1a2f4a, transparent: true, opacity: 0.22, depthWrite: false }));
+blobShadow.rotation.x = -Math.PI / 2; blobShadow.renderOrder = 1; scene.add(blobShadow);
 /* Player-only material clones so crash feedback can fade the player
    without touching obstacles that share the base materials. */
 const playerMats = [];
@@ -1049,9 +1174,14 @@ function render(){
   /* subtle camera roll with lateral velocity for a carving lean feel */
   camera.rotateZ(THREE.MathUtils.clamp(-S.latV * 0.0015, -0.03, 0.03));
 
-  /* keep backdrop mountains ahead of the player */
-  distant.position.z = -S.dist - 280; distant.position.y = groundY(S.dist) + 6;
-  distant2.position.z = -S.dist - 340; distant2.position.y = groundY(S.dist);
+  /* keep the mountain range and clouds ahead of the player */
+  peaks.position.set(centerX(S.dist) * 0.5, groundY(S.dist) - 4, -S.dist - 235);
+  clouds.position.set(centerX(S.dist) * 0.3, groundY(S.dist), -S.dist - 180);
+  /* blob shadow tracks the player, shrinking/fading as they jump */
+  blobShadow.position.set(px, groundY(S.dist) + 0.03, -S.dist);
+  const shS = Math.max(0.45, 1 - S.jumpY * 0.09);
+  blobShadow.scale.set(0.75 * shS, 1.5 * shS, 1);
+  blobShadow.material.opacity = 0.22 * shS;
   /* recycle ground segments */
   const baseSeg = Math.floor(Math.max(0, S.dist - SEG_LEN) / SEG_LEN);
   for (let i = 0; i < SEG_COUNT; i++) layoutSegment(segments[i], (baseSeg + i) * SEG_LEN);
