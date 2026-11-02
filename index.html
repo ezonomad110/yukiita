@@ -32,6 +32,8 @@
   .course-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
     padding:10px 26px; border-radius:999px; cursor:pointer; }
   .course-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
+  .course-btn.super { border-color:#ff4fd8; color:#ffb7ef; text-shadow:0 0 8px rgba(255,79,216,.8); box-shadow:0 0 10px rgba(255,79,216,.35), inset 0 0 8px rgba(64,224,255,.25); }
+  .course-btn.super.sel { background:linear-gradient(90deg,#ff4fd8,#8a5cff,#40e0ff); color:#fff; border-color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45); }
   .course-desc { margin-top:10px; font-size:12.5px; opacity:.85; min-height:1.4em; }
   #title .howto { margin-top:26px; font-size:12px; line-height:1.9; opacity:.75; }
 
@@ -154,13 +156,14 @@
     <button class="course-btn" data-course="easy">初級</button>
     <button class="course-btn" data-course="normal">中級</button>
     <button class="course-btn" data-course="hard">上級</button>
+    <button class="course-btn super" data-course="super">超級</button>
   </div>
   <p class="course-desc" id="course-desc"></p>
   <div class="best">BEST <b id="best-val">0</b></div>
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.2</p>
+  <p class="ver">v4.3</p>
 </div>
 
 <!-- Result -->
@@ -383,10 +386,14 @@ const TUNING_UI = false;
    late, slalom gates swinging wide, denser walls — and at night.
    The upper course reuses the beginner layout with hard time. */
 const COURSES = {
-  easy:   { label: '初級', len: 9000, startTime: 20, gateSec: 4, layout: null, wallEvery: 5, night: false },
-  normal: { label: '中級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 4, night: true,
+  easy:   { label: '初級', len: 9000, startTime: 20, gateSec: 4, layout: null, wallEvery: 5, theme: 'day' },
+  normal: { label: '中級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 4, theme: 'night',
             layout: { firstSlalom: true, steepStart: 5400, steepEnd: 7200, slalomWide: true } },
-  hard:   { label: '上級', len: 9000, startTime: 10, gateSec: 3, layout: null, wallEvery: 5, night: false },
+  hard:   { label: '上級', len: 9000, startTime: 10, gateSec: 3, layout: null, wallEvery: 5, theme: 'day' },
+  /* Super: a neon run through deep space — rainbow spur, sparkling
+     neon powder, warp starfield (see applyTheme / warp update). */
+  super:  { label: '超級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 3, theme: 'space',
+            layout: { firstSlalom: false, steepStart: 4500, steepEnd: 6300, slalomWide: true } },
 };
 let courseKey = 'easy';
 try { const c = localStorage.getItem('yukiita-course'); if (c && COURSES[c]) courseKey = c; } catch (e) {}
@@ -397,7 +404,7 @@ function setCourse(k){
   try { localStorage.setItem('yukiita-course', k); } catch (e) {}
   document.querySelectorAll('.course-btn').forEach(b => b.classList.toggle('sel', b.dataset.course === k));
   $('mission-sec').textContent = 'ゲート通過で +' + course.gateSec + '秒＆ハート回復。';
-  $('title-loc').textContent = (course.night ? 'Night Summit' : 'Summit') + ' · ' + course.label + 'コース';
+  $('title-loc').textContent = (course.theme === 'night' ? 'Night Summit' : course.theme === 'space' ? 'Neon Deep Space' : 'Summit') + ' · ' + course.label + 'コース';
   if (worldReady) rebuildWorld();
 }
 document.querySelectorAll('.course-btn').forEach(b => b.addEventListener('click', () => setCourse(b.dataset.course)));
@@ -616,19 +623,70 @@ const moon = new THREE.Group();
   moon.visible = false;
   peaks.add(moon);
 }
-const PEAK_DAY = [0xd8e9fa, 0xaecdf0, 0xc4dcf5], PEAK_NIGHT = [0x27354f, 0x1d2a44, 0x222f4c];
-function applyTheme(night){
-  scene.background.set(night ? 0x0a1128 : 0x87b7e8);
-  scene.fog.color.set(night ? 0x141f3d : 0xa8c8ee);
-  hemi.intensity = night ? 0.5 : 1.05;
-  hemi.color.set(night ? 0x8fb4ff : 0xdfefff);
-  hemi.groundColor.set(night ? 0x1c2a4a : 0x5a7296);
-  sun.intensity = night ? 0.5 : 1.6;
-  sun.color.set(night ? 0xbfd4ff : 0xffffff);
-  if (peakMatsRef) peakMatsRef.forEach((m, i) => m.color.set(night ? PEAK_NIGHT[i] : PEAK_DAY[i]));
-  clouds.visible = !night;
-  stars.visible = night;
+/* A ringed neon planet rides with the peaks group (super course). */
+const planet = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(16, 1), new THREE.MeshLambertMaterial({ color: 0x7a4fe0, fog: false }));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(21, 30, 40), new THREE.MeshBasicMaterial({ color: 0xff4fd8, fog: false, side: THREE.DoubleSide, transparent: true, opacity: 0.75 }));
+  ring.rotation.x = Math.PI / 2.4; ring.rotation.y = 0.35;
+  planet.add(body, ring);
+  planet.position.set(-62, 108, -8);
+  planet.visible = false;
+  peaks.add(planet);
+}
+/* Warp starfield (super course): neon stars in a tube around the
+   camera that stream past as you ride — the space speed feel. */
+const WARP_N = 260;
+const warpPos = new Float32Array(WARP_N * 3);
+const warpCol = new Float32Array(WARP_N * 3);
+{
+  const palette = [[0.25,0.9,1],[1,0.3,0.9],[1,0.85,0.25],[0.5,1,0.4],[0.7,0.5,1],[1,1,1]];
+  const r = seededRand(90210);
+  for (let i = 0; i < WARP_N; i++) {
+    warpPos[i*3] = (r() - 0.5) * 150; warpPos[i*3+1] = (r() - 0.5) * 90 + 8; warpPos[i*3+2] = -r() * 340 + 15;
+    const c = palette[Math.floor(r() * palette.length)];
+    warpCol[i*3] = c[0]; warpCol[i*3+1] = c[1]; warpCol[i*3+2] = c[2];
+  }
+}
+const warpGeo = new THREE.BufferGeometry();
+warpGeo.setAttribute('position', new THREE.BufferAttribute(warpPos, 3));
+warpGeo.setAttribute('color', new THREE.BufferAttribute(warpCol, 3));
+const warp = new THREE.Points(warpGeo, new THREE.PointsMaterial({ size: 1.5, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+warp.frustumCulled = false; warp.visible = false;
+scene.add(warp);
+function updateWarp(dt){
+  warp.position.copy(camera.position);
+  if (!warp.visible) return;
+  const v = (30 + S.speed * 1.6) * dt;
+  for (let i = 0; i < WARP_N; i++) {
+    warpPos[i*3+2] += v;
+    if (warpPos[i*3+2] > 15) {
+      warpPos[i*3+2] -= 355;
+      warpPos[i*3] = (Math.random() - 0.5) * 150;
+      warpPos[i*3+1] = (Math.random() - 0.5) * 90 + 8;
+    }
+  }
+  warpGeo.attributes.position.needsUpdate = true;
+}
+const PEAK_DAY = [0xd8e9fa, 0xaecdf0, 0xc4dcf5], PEAK_NIGHT = [0x27354f, 0x1d2a44, 0x222f4c], PEAK_SPACE = [0x1d0b3d, 0x160830, 0x22104a];
+let theme = 'day';
+function applyTheme(t){
+  theme = t;
+  const night = t === 'night', space = t === 'space';
+  scene.background.set(space ? 0x060213 : night ? 0x0a1128 : 0x87b7e8);
+  scene.fog.color.set(space ? 0x150830 : night ? 0x141f3d : 0xa8c8ee);
+  hemi.intensity = space ? 0.7 : night ? 0.5 : 1.05;
+  hemi.color.set(space ? 0xa58bff : night ? 0x8fb4ff : 0xdfefff);
+  hemi.groundColor.set(space ? 0x1c0b40 : night ? 0x1c2a4a : 0x5a7296);
+  sun.intensity = space ? 0.75 : night ? 0.5 : 1.6;
+  sun.color.set(space ? 0xff8ae2 : night ? 0xbfd4ff : 0xffffff);
+  if (peakMatsRef) peakMatsRef.forEach((m, i) => m.color.set(space ? PEAK_SPACE[i] : night ? PEAK_NIGHT[i] : PEAK_DAY[i]));
+  clouds.visible = t === 'day';
+  stars.visible = night || space;
   moon.visible = night;
+  planet.visible = space;
+  warp.visible = space;
+  MAT.snow.color.set(space ? 0x8f7fe8 : 0xffffff);
 }
 
 const MAT = {
@@ -932,8 +990,8 @@ function rebuildWorld(){
   buildGates();
   for (const [ci, g] of chunks) { scene.remove(g); chunks.delete(ci); }
   lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
-  applyTheme(!!course.night);
-  $('course-desc').textContent = (course.night ? '🌙 ナイトコース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
+  applyTheme(course.theme || 'day');
+  $('course-desc').textContent = (course.theme === 'night' ? '🌙 ナイトコース ／ ' : course.theme === 'space' ? '🚀 ネオンスペース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
 }
 worldReady = true;
 rebuildWorld();
@@ -1028,6 +1086,8 @@ function emitSpray(x, y, z, n, spread){
   }
 }
 function updateSpray(dt){
+  if (theme === 'space') spray.material.color.setHSL((performance.now() * 0.00035) % 1, 0.85, 0.72);
+  else spray.material.color.setRGB(1, 1, 1);
   for (let i = 0; i < SPRAY_N; i++) {
     if (sprayLife[i] <= 0) continue;
     sprayLife[i] -= dt;
@@ -1049,6 +1109,7 @@ const powderCol = new Float32Array(POWDER_N * 3);
 const powderVel = new Float32Array(POWDER_N * 3);
 const powderLife = new Float32Array(POWDER_N);
 const powderMax = new Float32Array(POWDER_N);
+const powderBase = new Float32Array(POWDER_N * 3);   /* per-particle neon colour (space theme) */
 const powderGeo = new THREE.BufferGeometry();
 powderGeo.setAttribute('position', new THREE.BufferAttribute(powderPos, 3));
 powderGeo.setAttribute('color', new THREE.BufferAttribute(powderCol, 3));
@@ -1056,13 +1117,25 @@ const powder = new THREE.Points(powderGeo, new THREE.PointsMaterial({ size: 1.15
 powder.frustumCulled = false; scene.add(powder);
 let powderIdx = 0;
 for (let i = 0; i < POWDER_N; i++) { powderPos[i*3+1] = -9999; }
+const NEON_PALETTE = [[0.25,0.9,1],[1,0.3,0.9],[1,0.85,0.25],[0.5,1,0.4],[0.7,0.5,1],[1,0.45,0.6]];
 function emitPowder(x, y, z, vx, vy, vz){
   const i = powderIdx; powderIdx = (powderIdx + 1) % POWDER_N;
   powderPos[i*3] = x; powderPos[i*3+1] = y; powderPos[i*3+2] = z;
   powderVel[i*3] = vx; powderVel[i*3+1] = vy; powderVel[i*3+2] = vz;
   powderMax[i] = powderLife[i] = 0.9 + Math.random() * 0.8;
+  const c = NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)];
+  powderBase[i*3] = c[0]; powderBase[i*3+1] = c[1]; powderBase[i*3+2] = c[2];
 }
+let powderSpace = false, powderT = 0;
 function updatePowder(dt){
+  powderT += dt;
+  const space = theme === 'space';
+  if (powderSpace !== space) {
+    powderSpace = space;
+    powder.material.blending = space ? THREE.AdditiveBlending : THREE.NormalBlending;
+    powder.material.opacity = space ? 0.9 : 0.5;
+    powder.material.needsUpdate = true;
+  }
   for (let i = 0; i < POWDER_N; i++) {
     if (powderLife[i] <= 0) continue;
     powderLife[i] -= dt;
@@ -1074,9 +1147,17 @@ function updatePowder(dt){
     powderPos[i*3+1] += powderVel[i*3+1] * dt;
     powderPos[i*3+2] += powderVel[i*3+2] * dt;
     const f = powderLife[i] / powderMax[i];   /* 1 fresh -> 0 spent */
-    powderCol[i*3]     = 0.66 + 0.34 * f;
-    powderCol[i*3 + 1] = 0.78 + 0.22 * f;
-    powderCol[i*3 + 2] = 0.93 + 0.07 * f;
+    if (space) {
+      /* neon sparkle: keep the hue, twinkle while it lives */
+      const b = (0.25 + 0.75 * f) * (0.72 + 0.28 * Math.sin(powderT * 18 + i * 2.39));
+      powderCol[i*3] = powderBase[i*3] * b;
+      powderCol[i*3 + 1] = powderBase[i*3+1] * b;
+      powderCol[i*3 + 2] = powderBase[i*3+2] * b;
+    } else {
+      powderCol[i*3]     = 0.66 + 0.34 * f;
+      powderCol[i*3 + 1] = 0.78 + 0.22 * f;
+      powderCol[i*3 + 2] = 0.93 + 0.07 * f;
+    }
   }
   powderGeo.attributes.position.needsUpdate = true;
   powderGeo.attributes.color.needsUpdate = true;
@@ -1111,11 +1192,16 @@ function recordTrail(){
   }
   /* in the steep zone the spur becomes a wide, dark powder trench */
   const sw = steepW(S.dist);
-  trailPts.push({ x, y, z, px, pz, brk: trailBreak, w: TRAIL_HW * (1 + 1.1 * sw), s: 1 - 0.3 * sw });
+  trailPts.push({ x, y, z, px, pz, brk: trailBreak, w: TRAIL_HW * (1 + 1.1 * sw), s: 1 - 0.3 * sw, h: (S.dist * 0.015) % 1 });
   if (trailPts.length > TRAIL_MAX_PTS) trailPts.shift();
   lastTrailD = S.dist; trailBreak = false;
 }
+function rainbowRGB(h){
+  const x = (((h % 1) + 1) % 1) * 6, i = Math.floor(x) % 6, f = x - Math.floor(x);
+  return [[1, f, 0], [1 - f, 1, 0], [0, 1, f], [0, 1 - f, 1], [f, 0, 1], [1, 0, 1 - f]][i];
+}
 function updateTrailMesh(){
+  const space = theme === 'space';
   const n = trailPts.length;
   let seg = 0;
   for (let i = 1; i < n; i++) {
@@ -1127,13 +1213,21 @@ function updateTrailMesh(){
     trailPos[pb + 9] = b.x + b.px * b.w; trailPos[pb + 10] = b.y; trailPos[pb + 11] = b.z + b.pz * b.w;
     let aa = 0.68 * Math.pow((i - 1) / Math.max(1, n - 1), 1.4);
     let ab = 0.68 * Math.pow(i / Math.max(1, n - 1), 1.4);
+    if (space) { aa = Math.min(0.92, aa * 1.35); ab = Math.min(0.92, ab * 1.35); }
     if (b.brk) { aa = 0; ab = 0; }
     const alphas = [aa, aa, ab, ab];
     for (let v = 0; v < 4; v++) {
-      /* grey groove: the old light-blue line washed out against the
-         faceted snow once the ground gained colour patches */
-      const sh = v < 2 ? a.s : b.s;
-      trailCol[cb + v * 4] = 0.4 * sh; trailCol[cb + v * 4 + 1] = 0.43 * sh; trailCol[cb + v * 4 + 2] = 0.48 * sh;
+      if (space) {
+        /* rainbow spur: hue is baked per point from distance, so the
+           ribbon cycles through the spectrum as it grows behind you */
+        const c = rainbowRGB((v < 2 ? a : b).h);
+        trailCol[cb + v * 4] = c[0]; trailCol[cb + v * 4 + 1] = c[1]; trailCol[cb + v * 4 + 2] = c[2];
+      } else {
+        /* grey groove: the old light-blue line washed out against the
+           faceted snow once the ground gained colour patches */
+        const sh = v < 2 ? a.s : b.s;
+        trailCol[cb + v * 4] = 0.4 * sh; trailCol[cb + v * 4 + 1] = 0.43 * sh; trailCol[cb + v * 4 + 2] = 0.48 * sh;
+      }
       trailCol[cb + v * 4 + 3] = alphas[v];
     }
     seg++;
@@ -1535,7 +1629,7 @@ function render(){
   const cx = centerX(S.dist - 6) + S.latX * 0.82;
   camera.position.set(cx, groundY(S.dist) + up + S.jumpY * 0.5, -S.dist + back);
   camera.lookAt(centerX(S.dist + 14) + S.latX * 0.9, groundY(S.dist + 14) - 0.5, -(S.dist + 14));
-  const targetFov = 62 + speedRatio * 14;
+  const targetFov = 62 + speedRatio * (theme === 'space' ? 26 : 14);
   if (Math.abs(camera.fov - targetFov) > 0.1) { camera.fov += (targetFov - camera.fov) * 0.08; camera.updateProjectionMatrix(); }
   /* subtle camera roll with lateral velocity for a carving lean feel */
   camera.rotateZ(THREE.MathUtils.clamp(-S.latV * 0.0015, -0.03, 0.03));
@@ -1649,7 +1743,7 @@ function loop(now){
   requestAnimationFrame(loop);
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.05) dt = 0.05;                 /* clamp tab-switch jumps */
-  if (S.mode !== 'pause') { update(dt); updateSpray(dt); updatePowder(dt); }
+  if (S.mode !== 'pause') { update(dt); updateSpray(dt); updatePowder(dt); updateWarp(dt); }
   render(); renderHUD();
 }
 requestAnimationFrame(loop);
