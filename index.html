@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.1</p>
+  <p class="ver">v3.2</p>
 </div>
 
 <!-- Result -->
@@ -723,9 +723,13 @@ function buildChunk(idx){
   for (let i = 0; i < nd; i++) {
     const dist = start + 4 + rand() * (CHUNK - 8);
     const side = rand() < 0.5 ? -1 : 1;
-    const off = side * (29.5 + rand() * 26);
+    /* scenery used to start at |off| 29.5 with up to 2x scale: a rider
+       carving at the course edge (|latX| up to 24) could pass ~5m from
+       a 9m tree, which then filled or blocked the whole chase view.
+       Start scenery at 38m and cap the scale at 1.5x instead. */
+    const off = side * (38 + rand() * 22);
     const obj = rand() < 0.78 ? makeTree() : makeRock();
-    obj.scale.setScalar(0.9 + rand() * 1.1);
+    obj.scale.setScalar(0.9 + rand() * 0.6);
     if (obj.userData.obKind === 'tree' && rand() < 0.4) {
       obj.children.forEach(c => { if (c.material === MAT.pine) c.material = MAT.pine2; });
     }
@@ -1278,6 +1282,23 @@ function render(){
      so the range can never sink under the slope or leave the frame. */
   peaks.position.set(camera.position.x * 0.92 + centerX(S.dist) * 0.08, camera.position.y - 64, camera.position.z - 245);
   clouds.position.set(camera.position.x * 0.9, camera.position.y + 30, camera.position.z - 215);
+  /* Obstacles the rider just squeezed past can swing into the chase
+     camera and fill the whole screen with one flat green polygon for
+     a few frames (seen in play footage after a near miss). Cull
+     anything already past the rider that comes within ~5m of the
+     camera itself; approaching obstacles are never culled. */
+  const camIdx = Math.floor(S.dist / CHUNK);
+  for (let ci = camIdx - 1; ci <= camIdx + 1; ci++) {
+    const chunk = chunks.get(ci); if (!chunk) continue;
+    for (const list of [chunk.userData.items, chunk.userData.decor || []]) {
+      for (const o of list) {
+        if (o.userData.dist > S.dist + 0.5) { o.visible = true; continue; }
+        const dx = (centerX(o.userData.dist) + o.userData.off) - camera.position.x;
+        const dz = (-o.userData.dist) - camera.position.z;
+        o.visible = (dx * dx + dz * dz) >= 23;
+      }
+    }
+  }
   /* blob shadow tracks the player, shrinking/fading as they jump */
   blobShadow.position.set(px, groundY(S.dist) + 0.03, -S.dist);
   const shS = Math.max(0.45, 1 - S.jumpY * 0.09);
