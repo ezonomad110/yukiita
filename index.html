@@ -39,6 +39,7 @@
   #hud-zone { display:inline-block; margin-top:5px; font-size:11px; font-weight:800; letter-spacing:.18em;
     padding:3px 10px; border-radius:999px; background:rgba(56,120,255,.55); text-shadow:0 1px 4px rgba(0,0,0,.5); }
   #hud-zone.slalom { background:rgba(255,90,60,.6); }
+  #hud-zone.steep { background:rgba(255,150,40,.65); }
   /* ---------- Next-gate arrow marker (DOM, visible through fog) ---------- */
   #gate-marker { position:fixed; z-index:11; pointer-events:none; text-align:center; color:#ffd94d;
     transform:translate(-50%,-50%); text-shadow:0 2px 10px rgba(0,0,0,.65); }
@@ -137,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v2.9</p>
+  <p class="ver">v3.0</p>
 </div>
 
 <!-- Result -->
@@ -232,7 +233,11 @@ var YukiitaLogic = (function () {
   /* Course sections: 900m each, alternating. Section 0 (0-899m) is a
      speed zone, section 1 a slalom (obstacle) zone, and so on. */
   var SECTION_LEN = 900;
+  /* The steep showcase stretch replaces whatever sections it spans:
+     a long, steep carving descent mid-course. */
+  var STEEP_START = 3600, STEEP_END = 5400;
   function zoneTypeAt(dist) {
+    if (dist >= STEEP_START && dist < STEEP_END) return "steep";
     var sec = Math.floor(Math.max(0, dist) / SECTION_LEN);
     return sec % 2 === 0 ? "speed" : "slalom";
   }
@@ -244,7 +249,7 @@ var YukiitaLogic = (function () {
   var SPEED_GATE_OFFSETS = [14, -14, 18, -18, 11, -11, 16, -16];
   var SLALOM_GATE_OFFSETS = [0, 4, -3, 5, -5, 0];
   function gateOffset(dist, zoneIndex) {
-    var cyc = zoneTypeAt(dist) === "speed" ? SPEED_GATE_OFFSETS : SLALOM_GATE_OFFSETS;
+    var cyc = zoneTypeAt(dist) === "slalom" ? SLALOM_GATE_OFFSETS : SPEED_GATE_OFFSETS;
     var i = ((zoneIndex % cyc.length) + cyc.length) % cyc.length;
     return cyc[i];
   }
@@ -287,6 +292,8 @@ var YukiitaLogic = (function () {
     gateSideLabel: gateSideLabel,
     effectiveCap: effectiveCap,
     SECTION_LEN: SECTION_LEN,
+    STEEP_START: STEEP_START,
+    STEEP_END: STEEP_END,
     zoneTypeAt: zoneTypeAt,
     gateOffset: gateOffset,
     markerDir: markerDir,
@@ -408,7 +415,25 @@ function racingLineAt(d){
 }
 
 function centerX(dist){ return Math.sin(dist * 0.004) * 14 + Math.sin(dist * 0.0013 + 1.7) * 10; }
-function groundY(dist){ return -dist * SLOPE + rollAt(dist); }
+function groundY(dist){ return -dist * SLOPE - steepDrop(dist) + rollAt(dist); }
+/* The steep zone's extra grade: a raised-cosine profile over
+   [STEEP_START, STEEP_END] peaking at +0.17 (total grade ~0.33 at
+   the heart) and easing in/out at the ends. steepDrop is its exact
+   integral, so groundY stays a pure C1 function and every system
+   keyed to groundY (mesh, objects, camera, slope physics) agrees.
+   After the zone the course simply sits lower by the total drop. */
+const STEEP_EXTRA = 0.17, STEEP_LEN = L.STEEP_END - L.STEEP_START;
+function steepW(dist){
+  if (dist <= L.STEEP_START || dist >= L.STEEP_END) return 0;
+  const t = (dist - L.STEEP_START) / STEEP_LEN;
+  return 0.5 * (1 - Math.cos(2 * Math.PI * t));
+}
+function steepDrop(dist){
+  if (dist <= L.STEEP_START) return 0;
+  if (dist >= L.STEEP_END) return STEEP_EXTRA * STEEP_LEN * 0.5;
+  const t = (dist - L.STEEP_START) / STEEP_LEN;
+  return STEEP_EXTRA * STEEP_LEN * (0.5 * t - Math.sin(2 * Math.PI * t) / (4 * Math.PI));
+}
 /* Rolling undulation INSIDE the corridor, baked into groundY itself
    so the ground mesh, gates, obstacles, camera, trail and the slope
    physics all follow the same ground truth. Two sine swells
@@ -522,7 +547,11 @@ function makeGroundGeo(mid){
       verts.push(x, z * SLOPE + b + (rollAt(dist) - rollAt(mid)), z);
       const patch = 0.5 + 0.5 * Math.sin(dist * 0.23 + Math.sin(x * 0.14) * 2.2) * Math.sin(x * 0.19 + Math.sin(dist * 0.09) * 2.0);
       const m = Math.max(0, Math.min(1, 0.62 + patch * 0.28 + b * 0.05));
-      cols.push(cShade[0] + (cWhite[0] - cShade[0]) * m, cShade[1] + (cWhite[1] - cShade[1]) * m, cShade[2] + (cWhite[2] - cShade[2]) * m);
+      let r = cShade[0] + (cWhite[0] - cShade[0]) * m, g2 = cShade[1] + (cWhite[1] - cShade[1]) * m, b2 = cShade[2] + (cWhite[2] - cShade[2]) * m;
+      /* the steep zone's snow reads icier/bluer so the pitch change is visible too */
+      const sw = steepW(dist) * 0.4;
+      r += (0.72 - r) * sw; g2 += (0.83 - g2) * sw; b2 += (0.97 - b2) * sw;
+      cols.push(r, g2, b2);
     }
   }
   const W = GROUND_COLS.length;
@@ -654,7 +683,7 @@ function buildChunk(idx){
   }
   /* --- SPEED zones: an avenue of trees flanks the racing line to the
      next gate (the line itself stays clear). SLALOM: scattered singles. --- */
-  if (zone === 'speed') {
+  if (zone === 'speed' || zone === 'steep') {
     for (const slotD of [start + 9, start + 29]) {
       if (slotD >= COURSE_LEN) continue;
       const line = racingLineAt(slotD);
@@ -666,7 +695,7 @@ function buildChunk(idx){
       }
     }
   }
-  const n = zone === 'speed' ? 0 : 2 + Math.floor(rand() * 3);
+  const n = (zone === 'speed' || zone === 'steep') ? 0 : 2 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -1056,7 +1085,7 @@ function update(dt){
   const zoneNow = L.zoneTypeAt(S.dist);
   if (zoneNow !== S.lastZone) {
     S.lastZone = zoneNow;
-    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : 'SLALOM ZONE — 障害物を避けろ');
+    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : zoneNow === 'steep' ? 'STEEP ZONE — 急斜面を刻め' : 'SLALOM ZONE — 障害物を避けろ');
   }
 
   /* --- speed --- */
@@ -1066,7 +1095,10 @@ function update(dt){
      cruise cap (top speed without accelerating). Above the current cap
      there is no positive acceleration, only a smooth glide-down drag,
      so releasing tuck at 240 glides toward cruise instead of snapping. */
-  const capNow = L.effectiveCap(tuning, input.tuck, inBurst);
+  /* The steep zone also raises every cap by up to +30% at its heart,
+     so the slope force translates into real extra speed instead of
+     fighting the glide-down drag the whole way down. */
+  const capNow = L.effectiveCap(tuning, input.tuck, inBurst) * (1 + 0.3 * steepW(S.dist));
   let a = -S.speed * 0.02;                               /* mild drag */
   /* Slope force from the rolling profile: pitches steeper than the
      base grade feed speed, rises bleed it — pumping over the whoops. */
@@ -1303,10 +1335,11 @@ function renderHUD(){
   tv.classList.toggle('low', S.time < 10);
   const zone = L.zoneTypeAt(S.dist);
   const hz = $('hud-zone');
-  hz.textContent = zone === 'speed' ? 'SPEED ZONE ・ スピード区間' : 'SLALOM ZONE ・ 障害物区間';
+  hz.textContent = zone === 'speed' ? 'SPEED ZONE ・ スピード区間' : zone === 'steep' ? 'STEEP ZONE ・ 急斜面区間' : 'SLALOM ZONE ・ 障害物区間';
   hz.classList.toggle('slalom', zone === 'slalom');
+  hz.classList.toggle('steep', zone === 'steep');
   const g = nextGate();
-  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +9秒';
+  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : g.zone === 'steep' ? 'STEEP' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +9秒';
   else $('next-val').textContent = '次は GOAL ・ ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
   $('hud-speed').innerHTML = Math.round(S.speed * 3.6) + '<small> km/h</small>';
   $('burst-bar').style.width = (S.burstTime > 0 ? 100 : S.burst) + '%';

@@ -110,6 +110,16 @@ eq(L.TUNING_KEYS, ['maxSpeed', 'accel', 'cruise', 'carve', 'brake', 'jumpPower',
   eq(L.zoneTypeAt(1800), 'speed', 'zone at 1800 is speed');
   eq(L.zoneTypeAt(8999), 'slalom', 'zone at 8999 is slalom');
 }
+/* steep zone: 3600-5400 overrides the alternating sections */
+{
+  eq(L.zoneTypeAt(3599), 'slalom', 'zone just before steep is slalom');
+  eq(L.zoneTypeAt(3600), 'steep', 'steep starts at 3600');
+  eq(L.zoneTypeAt(4500), 'steep', 'steep heart is steep');
+  eq(L.zoneTypeAt(5399), 'steep', 'steep runs to 5400');
+  eq(L.zoneTypeAt(5400), 'speed', 'zone after steep resumes alternation (speed)');
+  const st = []; for (let i = 0; i < 8; i++) st.push(L.gateOffset(4000, i));
+  eq(st.every(o => Math.abs(o) >= 11), true, 'steep-zone gates swing wide like speed');
+}
 /* gate offsets per zone: speed swings wide, slalom stays central, deterministic */
 {
   const sp = []; for (let i = 0; i < 8; i++) sp.push(L.gateOffset(400, i));
