@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.2</p>
+  <p class="ver">v3.3</p>
 </div>
 
 <!-- Result -->
@@ -859,7 +859,7 @@ const playerMats = [];
 player.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); playerMats.push(o.material); } });
 
 /* Snow spray particles */
-const SPRAY_N = 240;
+const SPRAY_N = 360;
 const sprayPos = new Float32Array(SPRAY_N * 3);
 const sprayVel = new Float32Array(SPRAY_N * 3);
 const sprayLife = new Float32Array(SPRAY_N);
@@ -919,7 +919,9 @@ function recordTrail(){
       px = -dz / len; pz = dx / len;
     } else { px = prev.px; pz = prev.pz; }
   }
-  trailPts.push({ x, y, z, px, pz, brk: trailBreak });
+  /* in the steep zone the spur becomes a wide, dark powder trench */
+  const sw = steepW(S.dist);
+  trailPts.push({ x, y, z, px, pz, brk: trailBreak, w: TRAIL_HW * (1 + 1.1 * sw), s: 1 - 0.3 * sw });
   if (trailPts.length > TRAIL_MAX_PTS) trailPts.shift();
   lastTrailD = S.dist; trailBreak = false;
 }
@@ -929,10 +931,10 @@ function updateTrailMesh(){
   for (let i = 1; i < n; i++) {
     const a = trailPts[i - 1], b = trailPts[i];
     const pb = seg * 12, cb = seg * 16;
-    trailPos[pb]     = a.x - a.px * TRAIL_HW; trailPos[pb + 1]  = a.y; trailPos[pb + 2]  = a.z - a.pz * TRAIL_HW;
-    trailPos[pb + 3] = a.x + a.px * TRAIL_HW; trailPos[pb + 4]  = a.y; trailPos[pb + 5]  = a.z + a.pz * TRAIL_HW;
-    trailPos[pb + 6] = b.x - b.px * TRAIL_HW; trailPos[pb + 7]  = b.y; trailPos[pb + 8]  = b.z - b.pz * TRAIL_HW;
-    trailPos[pb + 9] = b.x + b.px * TRAIL_HW; trailPos[pb + 10] = b.y; trailPos[pb + 11] = b.z + b.pz * TRAIL_HW;
+    trailPos[pb]     = a.x - a.px * a.w; trailPos[pb + 1]  = a.y; trailPos[pb + 2]  = a.z - a.pz * a.w;
+    trailPos[pb + 3] = a.x + a.px * a.w; trailPos[pb + 4]  = a.y; trailPos[pb + 5]  = a.z + a.pz * a.w;
+    trailPos[pb + 6] = b.x - b.px * b.w; trailPos[pb + 7]  = b.y; trailPos[pb + 8]  = b.z - b.pz * b.w;
+    trailPos[pb + 9] = b.x + b.px * b.w; trailPos[pb + 10] = b.y; trailPos[pb + 11] = b.z + b.pz * b.w;
     let aa = 0.68 * Math.pow((i - 1) / Math.max(1, n - 1), 1.4);
     let ab = 0.68 * Math.pow(i / Math.max(1, n - 1), 1.4);
     if (b.brk) { aa = 0; ab = 0; }
@@ -940,7 +942,8 @@ function updateTrailMesh(){
     for (let v = 0; v < 4; v++) {
       /* grey groove: the old light-blue line washed out against the
          faceted snow once the ground gained colour patches */
-      trailCol[cb + v * 4] = 0.4; trailCol[cb + v * 4 + 1] = 0.43; trailCol[cb + v * 4 + 2] = 0.48;
+      const sh = v < 2 ? a.s : b.s;
+      trailCol[cb + v * 4] = 0.4 * sh; trailCol[cb + v * 4 + 1] = 0.43 * sh; trailCol[cb + v * 4 + 2] = 0.48 * sh;
       trailCol[cb + v * 4 + 3] = alphas[v];
     }
     seg++;
@@ -1090,7 +1093,7 @@ function update(dt){
   const zoneNow = L.zoneTypeAt(S.dist);
   if (zoneNow !== S.lastZone) {
     S.lastZone = zoneNow;
-    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : zoneNow === 'steep' ? 'STEEP ZONE — 急斜面を刻め' : 'SLALOM ZONE — 障害物を避けろ');
+    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : zoneNow === 'steep' ? 'STEEP ZONE — 深雪を刻め' : 'SLALOM ZONE — 障害物を避けろ');
   }
 
   /* --- speed --- */
@@ -1230,13 +1233,24 @@ function update(dt){
     const n = Math.min(10, Math.round(2 + Math.abs(S.latV) * 0.18 + S.speed * 0.04));
     emitSpray(player.position.x - Math.sign(S.latV) * 0.3, player.position.y, player.position.z + 0.6, n, 2.2 + Math.abs(S.latV) * 0.06);
   }
+  /* --- deep-powder plume: in the steep zone the rider runs sunken
+     (by design — see render) and drags a constant rooster tail, so
+     the burial reads as ploughing powder rather than a glitch --- */
+  const swNow = steepW(S.dist);
+  if (S.grounded && swNow > 0.25 && S.speed > 40) {
+    emitSpray(player.position.x, player.position.y + 0.05, player.position.z + 0.9, Math.round(swNow * 5), 3.2);
+  }
 }
 
 /* ================= Render ================= */
 function render(){
   updateTrailMesh();
   const px = centerX(S.dist) + S.latX;
-  const py = groundY(S.dist) + S.jumpY;
+  /* Deep powder in the steep zone: the rider deliberately runs up to
+     ~0.3m sunken at the zone's heart (the plume spray and the wide
+     dark trench sell it). Airborne, the sink releases. */
+  const powderSink = S.grounded ? 0.3 * steepW(S.dist) : 0;
+  const py = groundY(S.dist) + S.jumpY - powderSink;
   player.position.set(px, py, -S.dist);
   player.rotation.z = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
   player.rotation.y = THREE.MathUtils.clamp(-S.latV * 0.012, -0.3, 0.3);
