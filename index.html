@@ -634,6 +634,10 @@ const player = new THREE.Group();
   hat.position.set(0, 1.8, 0.06); player.add(hat);
   scene.add(player);
 }
+/* Player-only material clones so crash feedback can fade the player
+   without touching skiers/obstacles that share the base materials. */
+const playerMats = [];
+player.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); playerMats.push(o.material); } });
 
 /* Snow spray particles */
 const SPRAY_N = 240;
@@ -669,13 +673,69 @@ function updateSpray(dt){
   sprayGeo.attributes.position.needsUpdate = true;
 }
 
+/* Spur (track groove left in the snow): a ribbon of segment quads
+   rebuilt each frame from recent grounded positions, fading out
+   toward the tail. One draw call, no per-frame allocation. */
+const TRAIL_MAX_PTS = 240, TRAIL_HW = 0.24;
+const trailPts = [];
+let lastTrailD = -10, trailBreak = true;
+const trailPos = new Float32Array((TRAIL_MAX_PTS - 1) * 4 * 3);
+const trailCol = new Float32Array((TRAIL_MAX_PTS - 1) * 4 * 4);
+const trailIdx = [];
+for (let s = 0; s < TRAIL_MAX_PTS - 1; s++) { const b = s * 4; trailIdx.push(b, b + 2, b + 1, b + 2, b + 3, b + 1); }
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 4));
+trailGeo.setIndex(trailIdx);
+const trail = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+trail.frustumCulled = false; trail.renderOrder = 1; scene.add(trail);
+function recordTrail(){
+  if (S.dist - lastTrailD < 1.0) return;
+  const x = centerX(S.dist) + S.latX, z = -S.dist, y = groundY(S.dist) + 0.04;
+  let px = 0, pz = 1;
+  const prev = trailPts[trailPts.length - 1];
+  if (prev) {
+    if (!trailBreak) {
+      const dx = x - prev.x, dz = z - prev.z, len = Math.hypot(dx, dz) || 1;
+      px = -dz / len; pz = dx / len;
+    } else { px = prev.px; pz = prev.pz; }
+  }
+  trailPts.push({ x, y, z, px, pz, brk: trailBreak });
+  if (trailPts.length > TRAIL_MAX_PTS) trailPts.shift();
+  lastTrailD = S.dist; trailBreak = false;
+}
+function updateTrailMesh(){
+  const n = trailPts.length;
+  let seg = 0;
+  for (let i = 1; i < n; i++) {
+    const a = trailPts[i - 1], b = trailPts[i];
+    const pb = seg * 12, cb = seg * 16;
+    trailPos[pb]     = a.x - a.px * TRAIL_HW; trailPos[pb + 1]  = a.y; trailPos[pb + 2]  = a.z - a.pz * TRAIL_HW;
+    trailPos[pb + 3] = a.x + a.px * TRAIL_HW; trailPos[pb + 4]  = a.y; trailPos[pb + 5]  = a.z + a.pz * TRAIL_HW;
+    trailPos[pb + 6] = b.x - b.px * TRAIL_HW; trailPos[pb + 7]  = b.y; trailPos[pb + 8]  = b.z - b.pz * TRAIL_HW;
+    trailPos[pb + 9] = b.x + b.px * TRAIL_HW; trailPos[pb + 10] = b.y; trailPos[pb + 11] = b.z + b.pz * TRAIL_HW;
+    let aa = 0.5 * Math.pow((i - 1) / Math.max(1, n - 1), 1.4);
+    let ab = 0.5 * Math.pow(i / Math.max(1, n - 1), 1.4);
+    if (b.brk) { aa = 0; ab = 0; }
+    const alphas = [aa, aa, ab, ab];
+    for (let v = 0; v < 4; v++) {
+      trailCol[cb + v * 4] = 0.55; trailCol[cb + v * 4 + 1] = 0.66; trailCol[cb + v * 4 + 2] = 0.9;
+      trailCol[cb + v * 4 + 3] = alphas[v];
+    }
+    seg++;
+  }
+  trailGeo.setDrawRange(0, seg * 6);
+  trailGeo.attributes.position.needsUpdate = true;
+  trailGeo.attributes.color.needsUpdate = true;
+}
+
 /* ================= Game state ================= */
 const S = {
   mode: 'title',            /* title | count | run | pause | result */
   time: 30, hearts: 3, score: 0, combo: 0, maxCombo: 0, burst: 0,
   dist: 0, speed: 0, maxSpeedSeen: 0,
   latX: 0, latV: 0, jumpY: 0, jumpV: 0, grounded: true,
-  burstTime: 0, invulnTime: 0, countT: 0, popupT: 0, runTime: 0,
+  burstTime: 0, invulnTime: 0, hitFlash: 0, countT: 0, popupT: 0, runTime: 0,
   lastZone: 'speed'
 };
 /* Rhythm-carve chain state (see L.updateCarve). */
@@ -742,7 +802,8 @@ function resetRun(){
   S.time = 30; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
-  S.burstTime = 0; S.invulnTime = 0; S.runTime = 0;
+  S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0;
+  trailPts.length = 0; lastTrailD = -10; trailBreak = true;
   S.lastZone = 'speed';
   carveSt.chain = 0; carveSt.dir = 0; carveSt.time = -9;
   for (const g of gates) g.passed = false;
@@ -879,6 +940,7 @@ function update(dt){
 
   /* --- obstacles: collision & near miss --- */
   if (S.invulnTime > 0) S.invulnTime -= dt;
+  if (S.hitFlash > 0) S.hitFlash -= dt;
   const idx = Math.floor(S.dist / CHUNK);
   for (let ci = idx; ci <= idx + 1; ci++) {
     const chunk = chunks.get(ci); if (!chunk) continue;
@@ -900,7 +962,7 @@ function update(dt){
               popup('ROCK! 減速');
             } else {
               /* trees & skiers: a real crash — lose a heart */
-              L.applyCollision(S); S.invulnTime = 1.2; carveSt.chain = 0; sndCrash();
+              L.applyCollision(S); S.invulnTime = 1.2; S.hitFlash = 1.2; carveSt.chain = 0; sndCrash();
               emitSpray(player.position.x, player.position.y, player.position.z, 22, 5);
               popup('CRASH! -0.5秒');
               if (S.hearts <= 0) { endRun('hearts'); return; }
@@ -930,6 +992,9 @@ function update(dt){
     }
   }
 
+  /* --- spur: record the track while grounded (gap while airborne) --- */
+  if (S.grounded) recordTrail(); else trailBreak = true;
+
   /* --- carve spray (scales with lateral velocity and speed) --- */
   if (S.grounded && Math.abs(S.latV) > 6 && S.speed > 10) {
     const n = Math.min(10, Math.round(2 + Math.abs(S.latV) * 0.18 + S.speed * 0.04));
@@ -939,12 +1004,19 @@ function update(dt){
 
 /* ================= Render ================= */
 function render(){
+  updateTrailMesh();
   const px = centerX(S.dist) + S.latX;
   const py = groundY(S.dist) + S.jumpY;
   player.position.set(px, py, -S.dist);
   player.rotation.z = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
   player.rotation.y = THREE.MathUtils.clamp(-S.latV * 0.012, -0.3, 0.3);
   player.rotation.x = input.tuck ? 0.25 : 0;
+  /* crash feedback: blink semi-transparent while hitFlash runs */
+  const flashing = S.hitFlash > 0;
+  for (const m of playerMats) {
+    if (flashing) { m.transparent = true; m.opacity = (Math.floor(S.hitFlash * 10) % 2 === 0) ? 0.3 : 0.65; }
+    else if (m.transparent) { m.transparent = false; m.opacity = 1; }
+  }
 
   const speedRatio = S.speed / tuning.maxSpeed;
   const back = 8.5 + speedRatio * 3.5, up = 4.2 + speedRatio * 1.1;
