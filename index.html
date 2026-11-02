@@ -137,7 +137,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v2.8</p>
+  <p class="ver">v2.9</p>
 </div>
 
 <!-- Result -->
@@ -408,7 +408,21 @@ function racingLineAt(d){
 }
 
 function centerX(dist){ return Math.sin(dist * 0.004) * 14 + Math.sin(dist * 0.0013 + 1.7) * 10; }
-function groundY(dist){ return -dist * SLOPE; }
+function groundY(dist){ return -dist * SLOPE + rollAt(dist); }
+/* Rolling undulation INSIDE the corridor, baked into groundY itself
+   so the ground mesh, gates, obstacles, camera, trail and the slope
+   physics all follow the same ground truth. Two sine swells
+   (230m + 97m, up to ~±3.5m combined) with the grade capped well
+   below the base slope; fades in after the start and out before
+   the goal so both ends stay calm. */
+function rollAt(dist){
+  const fi = Math.min(1, Math.max(0, (dist - 150) / 350));
+  const fo = Math.min(1, Math.max(0, (COURSE_LEN - dist - 100) / 300));
+  const f = Math.min(fi, fo);
+  if (f <= 0) return 0;
+  const s = f * f * (3 - 2 * f);
+  return s * (2.6 * Math.sin(dist * 0.0273 + 0.7) + 1.1 * Math.sin(dist * 0.0648 + 2.1));
+}
 /* Rolling relief OUTSIDE the ride corridor: exactly 0 for |x| <= 27,
    full by |x| >= 42, so gameplay ground truth never changes. A pure
    function of (dist, x), so recycled ground segments join seamlessly. */
@@ -505,7 +519,7 @@ function makeGroundGeo(mid){
     for (let c = 0; c < GROUND_COLS.length; c++) {
       const x = GROUND_COLS[c];
       const b = bumpAt(dist, x);
-      verts.push(x, z * SLOPE + b, z);
+      verts.push(x, z * SLOPE + b + (rollAt(dist) - rollAt(mid)), z);
       const patch = 0.5 + 0.5 * Math.sin(dist * 0.23 + Math.sin(x * 0.14) * 2.2) * Math.sin(x * 0.19 + Math.sin(dist * 0.09) * 2.0);
       const m = Math.max(0, Math.min(1, 0.62 + patch * 0.28 + b * 0.05));
       cols.push(cShade[0] + (cWhite[0] - cShade[0]) * m, cShade[1] + (cWhite[1] - cShade[1]) * m, cShade[2] + (cWhite[2] - cShade[2]) * m);
@@ -538,8 +552,10 @@ for (let i = 0; i < SEG_COUNT; i++) {
     for (const zo of [-12.5, 12.5]) {
       const pole = new THREE.Mesh(edgePoleGeo, side < 0 ? MAT.poleR : MAT.poleB);
       pole.position.set(side, zo * SLOPE + 0.85, zo);
+      pole.userData.roll = { zo, baseY: zo * SLOPE + 0.85 };
       const flag = new THREE.Mesh(edgeFlagGeo, side < 0 ? MAT.poleR : MAT.poleB);
       flag.position.set(side + (side < 0 ? 0.4 : -0.4), zo * SLOPE + 1.55, zo);
+      flag.userData.roll = { zo, baseY: zo * SLOPE + 1.55 };
       g.add(pole, flag);
     }
   }
@@ -548,6 +564,10 @@ for (let i = 0; i < SEG_COUNT; i++) {
 function layoutSegment(g, startDist){
   const mid = startDist + SEG_LEN / 2;
   g.position.set(centerX(mid), groundY(mid), -mid);
+  /* edge poles/flags ride the rolling profile too */
+  for (const ch of g.children) {
+    if (ch.userData.roll) ch.position.y = ch.userData.roll.baseY + (rollAt(mid - ch.userData.roll.zo) - rollAt(mid));
+  }
   g.rotation.y = -Math.atan((centerX(mid + 5) - centerX(mid - 5)) / 10);
   if (g.userData.builtFor !== startDist) {
     g.userData.builtFor = startDist;
@@ -879,12 +899,14 @@ function updateTrailMesh(){
     trailPos[pb + 3] = a.x + a.px * TRAIL_HW; trailPos[pb + 4]  = a.y; trailPos[pb + 5]  = a.z + a.pz * TRAIL_HW;
     trailPos[pb + 6] = b.x - b.px * TRAIL_HW; trailPos[pb + 7]  = b.y; trailPos[pb + 8]  = b.z - b.pz * TRAIL_HW;
     trailPos[pb + 9] = b.x + b.px * TRAIL_HW; trailPos[pb + 10] = b.y; trailPos[pb + 11] = b.z + b.pz * TRAIL_HW;
-    let aa = 0.5 * Math.pow((i - 1) / Math.max(1, n - 1), 1.4);
-    let ab = 0.5 * Math.pow(i / Math.max(1, n - 1), 1.4);
+    let aa = 0.68 * Math.pow((i - 1) / Math.max(1, n - 1), 1.4);
+    let ab = 0.68 * Math.pow(i / Math.max(1, n - 1), 1.4);
     if (b.brk) { aa = 0; ab = 0; }
     const alphas = [aa, aa, ab, ab];
     for (let v = 0; v < 4; v++) {
-      trailCol[cb + v * 4] = 0.55; trailCol[cb + v * 4 + 1] = 0.66; trailCol[cb + v * 4 + 2] = 0.9;
+      /* grey groove: the old light-blue line washed out against the
+         faceted snow once the ground gained colour patches */
+      trailCol[cb + v * 4] = 0.4; trailCol[cb + v * 4 + 1] = 0.43; trailCol[cb + v * 4 + 2] = 0.48;
       trailCol[cb + v * 4 + 3] = alphas[v];
     }
     seg++;
@@ -1046,6 +1068,9 @@ function update(dt){
      so releasing tuck at 240 glides toward cruise instead of snapping. */
   const capNow = L.effectiveCap(tuning, input.tuck, inBurst);
   let a = -S.speed * 0.02;                               /* mild drag */
+  /* Slope force from the rolling profile: pitches steeper than the
+     base grade feed speed, rises bleed it — pumping over the whoops. */
+  a += ((groundY(S.dist - 3) - groundY(S.dist + 3)) / 6 - SLOPE) * 170;
   if (input.brake) a -= tuning.brake;
   if (!input.tuck && !input.brake) a -= 2.2;             /* coast decay */
   if (S.speed > capNow) a -= (S.speed - capNow) * 0.06;  /* glide-down */
