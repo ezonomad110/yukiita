@@ -28,12 +28,14 @@
   .sub-btn { margin-top:14px; background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.35);
     font-size:14px; padding:10px 22px; border-radius:999px; cursor:pointer; }
   .sub-btn:active { transform:scale(.97); }
-  #course-row { display:flex; gap:10px; justify-content:center; margin-top:20px; }
-  .course-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
+  #course-row, #mode-row { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+  #mode-row { margin-top:16px; }
+  .course-btn, .mode-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
     padding:10px 26px; border-radius:999px; cursor:pointer; }
-  .course-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
-  .course-btn.super { border-color:#ff4fd8; color:#ffb7ef; text-shadow:0 0 8px rgba(255,79,216,.8); box-shadow:0 0 10px rgba(255,79,216,.35), inset 0 0 8px rgba(64,224,255,.25); }
-  .course-btn.super.sel { background:linear-gradient(90deg,#ff4fd8,#8a5cff,#40e0ff); color:#fff; border-color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45); }
+  .course-btn.sel, .mode-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
+  .mode-btn.neon { border-color:#ff4fd8; color:#ffb7ef; text-shadow:0 0 8px rgba(255,79,216,.8); box-shadow:0 0 10px rgba(255,79,216,.35), inset 0 0 8px rgba(64,224,255,.25); }
+  .mode-btn.neon.sel { background:linear-gradient(90deg,#ff4fd8,#8a5cff,#40e0ff); color:#fff; border-color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45); }
+  .row-label { font-size:11px; letter-spacing:.35em; opacity:.65; margin-top:18px; }
   .course-desc { margin-top:10px; font-size:12.5px; opacity:.85; min-height:1.4em; }
   #title .howto { margin-top:26px; font-size:12px; line-height:1.9; opacity:.75; }
 
@@ -152,18 +154,23 @@
   <div class="loc" id="title-loc">Summit · 初級コース</div>
   <h1>雪板<span class="en">YUKIITA</span></h1>
   <p class="mission">山頂から麓のロッジへ、制限時間内に滑り降りろ！<br><span id="mission-sec">ゲート通過で +4秒＆ハート回復。</span></p>
+  <p class="row-label">モード</p>
+  <div id="mode-row">
+    <button class="mode-btn" data-mode="snow">🏔 雪山</button>
+    <button class="mode-btn neon" data-mode="space">🚀 宇宙</button>
+  </div>
+  <p class="row-label">コース</p>
   <div id="course-row">
     <button class="course-btn" data-course="easy">初級</button>
     <button class="course-btn" data-course="normal">中級</button>
     <button class="course-btn" data-course="hard">上級</button>
-    <button class="course-btn super" data-course="super">超級</button>
   </div>
   <p class="course-desc" id="course-desc"></p>
   <div class="best">BEST <b id="best-val">0</b></div>
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.3</p>
+  <p class="ver">v4.4</p>
 </div>
 
 <!-- Result -->
@@ -380,34 +387,54 @@ const BURST_UI = false;
    Flip to true to bring the sliders back. */
 const TUNING_UI = false;
 
+/* Mode x Course (user call, 2026-11-02): the world dressing is a
+   MODE picked independently of the COURSE. Snow-mountain is the
+   classic daytime look; Space is the neon run (rainbow spur, neon
+   powder, warp starfield). The night theme still exists in
+   applyTheme but is not offered in the UI right now. */
+const MODES = {
+  snow:  { label: '雪山', theme: 'day' },
+  space: { label: '宇宙', theme: 'space' },
+};
+let modeKey = 'snow';
+try { const m = localStorage.getItem('yukiita-mode'); if (m && MODES[m]) modeKey = m; } catch (e) {}
+let mode = MODES[modeKey];
 /* Courses: the v3.9 balance is the beginner course (user call,
    after a 29-seconds-to-spare clear). The middle course is a
    DIFFERENT mountain: 12,000m, sections reversed, the steep stretch
-   late, slalom gates swinging wide, denser walls — and at night.
-   The upper course reuses the beginner layout with hard time. */
+   late, slalom gates swinging wide, denser walls. The upper course
+   reuses the beginner layout with hard time. */
 const COURSES = {
-  easy:   { label: '初級', len: 9000, startTime: 20, gateSec: 4, layout: null, wallEvery: 5, theme: 'day' },
-  normal: { label: '中級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 4, theme: 'night',
+  easy:   { label: '初級', len: 9000, startTime: 20, gateSec: 4, layout: null, wallEvery: 5 },
+  normal: { label: '中級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 4,
             layout: { firstSlalom: true, steepStart: 5400, steepEnd: 7200, slalomWide: true } },
-  hard:   { label: '上級', len: 9000, startTime: 10, gateSec: 3, layout: null, wallEvery: 5, theme: 'day' },
-  /* Super: a neon run through deep space — rainbow spur, sparkling
-     neon powder, warp starfield (see applyTheme / warp update). */
-  super:  { label: '超級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 3, theme: 'space',
-            layout: { firstSlalom: false, steepStart: 4500, steepEnd: 6300, slalomWide: true } },
+  hard:   { label: '上級', len: 9000, startTime: 10, gateSec: 3, layout: null, wallEvery: 5 },
 };
 let courseKey = 'easy';
 try { const c = localStorage.getItem('yukiita-course'); if (c && COURSES[c]) courseKey = c; } catch (e) {}
 let course = COURSES[courseKey];
 let worldReady = false;
+function updateTitleLoc(){
+  $('title-loc').textContent = (mode.theme === 'space' ? 'Neon Deep Space' : 'Summit') + ' · ' + course.label + 'コース（' + mode.label + '）';
+}
+function setMode(k){
+  modeKey = k; mode = MODES[k];
+  try { localStorage.setItem('yukiita-mode', k); } catch (e) {}
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('sel', b.dataset.mode === k));
+  updateTitleLoc();
+  if (worldReady) rebuildWorld();
+}
 function setCourse(k){
   courseKey = k; course = COURSES[k];
   try { localStorage.setItem('yukiita-course', k); } catch (e) {}
   document.querySelectorAll('.course-btn').forEach(b => b.classList.toggle('sel', b.dataset.course === k));
   $('mission-sec').textContent = 'ゲート通過で +' + course.gateSec + '秒＆ハート回復。';
-  $('title-loc').textContent = (course.theme === 'night' ? 'Night Summit' : course.theme === 'space' ? 'Neon Deep Space' : 'Summit') + ' · ' + course.label + 'コース';
+  updateTitleLoc();
   if (worldReady) rebuildWorld();
 }
+document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.querySelectorAll('.course-btn').forEach(b => b.addEventListener('click', () => setCourse(b.dataset.course)));
+setMode(modeKey);
 setCourse(courseKey);
 function saveTuning(){ try { localStorage.setItem('yukiita_tuning', JSON.stringify(tuning)); } catch(e) {} }
 
@@ -990,8 +1017,8 @@ function rebuildWorld(){
   buildGates();
   for (const [ci, g] of chunks) { scene.remove(g); chunks.delete(ci); }
   lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
-  applyTheme(course.theme || 'day');
-  $('course-desc').textContent = (course.theme === 'night' ? '🌙 ナイトコース ／ ' : course.theme === 'space' ? '🚀 ネオンスペース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
+  applyTheme(mode.theme);
+  $('course-desc').textContent = (mode.theme === 'space' ? '🚀 ネオンスペース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
 }
 worldReady = true;
 rebuildWorld();
@@ -1354,7 +1381,7 @@ function endRun(reason){
   $('r-dist').textContent = Math.floor(S.dist) + ' m';
   $('r-speed').textContent = Math.round(S.maxSpeedSeen * 3.6) + ' km/h';
   $('r-combo').textContent = '×' + S.maxCombo;
-  $('r-course').textContent = course.label;
+  $('r-course').textContent = course.label + '（' + mode.label + '）';
   $('result').classList.remove('hidden');
 }
 function togglePause(){
