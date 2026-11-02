@@ -157,6 +157,7 @@
   <p class="row-label">モード</p>
   <div id="mode-row">
     <button class="mode-btn" data-mode="snow">🏔 雪山</button>
+    <button class="mode-btn" data-mode="night">🌙 夜</button>
     <button class="mode-btn neon" data-mode="space">🚀 宇宙</button>
   </div>
   <p class="row-label">コース</p>
@@ -170,7 +171,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.4</p>
+  <p class="ver">v4.5</p>
 </div>
 
 <!-- Result -->
@@ -394,6 +395,7 @@ const TUNING_UI = false;
    applyTheme but is not offered in the UI right now. */
 const MODES = {
   snow:  { label: '雪山', theme: 'day' },
+  night: { label: '夜', theme: 'night' },
   space: { label: '宇宙', theme: 'space' },
 };
 let modeKey = 'snow';
@@ -415,7 +417,7 @@ try { const c = localStorage.getItem('yukiita-course'); if (c && COURSES[c]) cou
 let course = COURSES[courseKey];
 let worldReady = false;
 function updateTitleLoc(){
-  $('title-loc').textContent = (mode.theme === 'space' ? 'Neon Deep Space' : 'Summit') + ' · ' + course.label + 'コース（' + mode.label + '）';
+  $('title-loc').textContent = (mode.theme === 'space' ? 'Neon Deep Space' : mode.theme === 'night' ? 'Night Summit' : 'Summit') + ' · ' + course.label + 'コース（' + mode.label + '）';
 }
 function setMode(k){
   modeKey = k; mode = MODES[k];
@@ -1018,7 +1020,7 @@ function rebuildWorld(){
   for (const [ci, g] of chunks) { scene.remove(g); chunks.delete(ci); }
   lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
   applyTheme(mode.theme);
-  $('course-desc').textContent = (mode.theme === 'space' ? '🚀 ネオンスペース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
+  $('course-desc').textContent = (mode.theme === 'space' ? '🚀 ネオンスペース ／ ' : mode.theme === 'night' ? '🌙 ナイト ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
 }
 worldReady = true;
 rebuildWorld();
