@@ -144,12 +144,12 @@
 <div id="title" class="overlay">
   <div class="loc">Summit · Course 1</div>
   <h1>雪板<span class="en">YUKIITA</span></h1>
-  <p class="mission">山頂から麓のロッジへ、制限時間内に滑り降りろ！<br>ゲート通過で +9秒＆ハート回復。</p>
+  <p class="mission">山頂から麓のロッジへ、制限時間内に滑り降りろ！<br>ゲート通過で +6秒＆ハート回復。</p>
   <div class="best">BEST <b id="best-val">0</b></div>
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.7</p>
+  <p class="ver">v3.8</p>
 </div>
 
 <!-- Result -->
@@ -192,7 +192,7 @@
 "use strict";
 /* Pure game-logic helpers (also exercised by tests/logic.test.mjs). */
 var YukiitaLogic = (function () {
-  var CHECKPOINT_BONUS_SEC = 9;
+  var CHECKPOINT_BONUS_SEC = 6;
   var CHECKPOINT_SCORE = 160;
   var COLLISION_TIME_PENALTY = 0.5;
   var COLLISION_SPEED_FACTOR = 0.45;
@@ -1015,7 +1015,7 @@ function updateTrailMesh(){
 /* ================= Game state ================= */
 const S = {
   mode: 'title',            /* title | count | run | pause | result */
-  time: 30, hearts: 3, score: 0, combo: 0, maxCombo: 0, burst: 0,
+  time: 25, hearts: 3, score: 0, combo: 0, maxCombo: 0, burst: 0,
   dist: 0, speed: 0, maxSpeedSeen: 0,
   latX: 0, latV: 0, jumpY: 0, jumpV: 0, grounded: true,
   burstTime: 0, invulnTime: 0, hitFlash: 0, dmgT: 0, countT: 0, popupT: 0, runTime: 0,
@@ -1096,7 +1096,7 @@ function zoneBanner(title, sub, cls){
 }
 
 function resetRun(){
-  S.time = 30; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
+  S.time = 25; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
   S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0; S.dmgT = 0;
@@ -1245,7 +1245,7 @@ function update(dt){
   if (g && prevDist < g.dist && S.dist >= g.dist) {
     g.passed = true;
     if (L.isGatePass(S.latX, g.off)) {
-      L.applyCheckpoint(S); sndCheckpoint(); popup('+9秒 ⛩ GATE!');
+      L.applyCheckpoint(S); sndCheckpoint(); popup('+6秒 ⛩ GATE!');
     } else {
       S.combo = 0; popup('GATE MISS');
     }
@@ -1499,7 +1499,7 @@ function renderHUD(){
   hz.classList.toggle('slalom', zone === 'slalom');
   hz.classList.toggle('steep', zone === 'steep');
   const g = nextGate();
-  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : g.zone === 'steep' ? 'STEEP' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +9秒';
+  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : g.zone === 'steep' ? 'STEEP' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +6秒';
   else $('next-val').textContent = '次は GOAL ・ ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
   $('hud-speed').innerHTML = Math.round(S.speed * 3.6) + '<small> km/h</small>';
   $('burst-bar').style.width = (S.burstTime > 0 ? 100 : S.burst) + '%';

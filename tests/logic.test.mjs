@@ -20,10 +20,10 @@ function eq(actual, expected, name) {
 }
 function fresh() { return { time: 20, hearts: 2, score: 0, combo: 5, maxCombo: 5, burst: 0, speed: 30 }; }
 
-/* checkpoint: +9s, +1 heart (cap 3), combo reset, +160 score */
+/* checkpoint: +6s, +1 heart (cap 3), combo reset, +160 score */
 {
   const s = fresh(); L.applyCheckpoint(s);
-  eq(s.time, 29, 'checkpoint adds +9 seconds');
+  eq(s.time, 26, 'checkpoint adds +6 seconds');
   eq(s.hearts, 3, 'checkpoint restores 1 heart');
   eq(s.combo, 0, 'checkpoint resets combo');
   eq(s.score, 160, 'checkpoint adds score');
