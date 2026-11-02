@@ -62,6 +62,8 @@
   #countdown { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:15; pointer-events:none;
     font-size:120px; font-weight:900; text-shadow:0 6px 40px rgba(0,0,0,.6); }
   #gold { position:fixed; inset:0; z-index:5; pointer-events:none; background:radial-gradient(ellipse at center, rgba(255,190,0,0) 55%, rgba(255,175,0,.45) 100%); opacity:0; transition:opacity .25s; }
+  #dmg { position:fixed; inset:0; z-index:6; pointer-events:none; background:radial-gradient(ellipse at center, rgba(255,0,0,0) 50%, rgba(225,25,25,.6) 100%); opacity:0; }
+  .ver { color:rgba(255,255,255,.45); font-size:11px; margin-top:14px; letter-spacing:.15em; }
   #speedlines { position:fixed; inset:0; z-index:4; pointer-events:none; opacity:0;
     background:repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 7deg, rgba(255,255,255,.13) 8deg, transparent 10deg 18deg);
     -webkit-mask-image:radial-gradient(ellipse at center, transparent 52%, #000 88%); mask-image:radial-gradient(ellipse at center, transparent 52%, #000 88%); }
@@ -94,6 +96,7 @@
 <canvas id="game-canvas"></canvas>
 <div id="speedlines"></div>
 <div id="gold"></div>
+<div id="dmg"></div>
 
 <!-- HUD -->
 <div id="hud" class="hidden">
@@ -134,6 +137,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
+  <p class="ver">v2.5</p>
 </div>
 
 <!-- Result -->
@@ -391,6 +395,17 @@ const GATE_ZONE_MAP = new Map();
 function gateOffsetForDist(dist){
   return GATE_OFF_MAP.has(dist) ? GATE_OFF_MAP.get(dist) : 0;
 }
+/* The racing line: piecewise-linear path through every gate offset
+   (starting centred). SPEED-zone corridor trees flank this line. */
+function racingLineAt(d){
+  let pd = 0, po = 0;
+  for (let i = 0; i < GATE_DISTANCES.length; i++) {
+    const gd = GATE_DISTANCES[i], go = gateOffsetForDist(gd);
+    if (d <= gd) { const t = gd === pd ? 0 : (d - pd) / (gd - pd); return po + (go - po) * t; }
+    pd = gd; po = go;
+  }
+  return po;
+}
 
 function centerX(dist){ return Math.sin(dist * 0.004) * 14 + Math.sin(dist * 0.0013 + 1.7) * 10; }
 function groundY(dist){ return -dist * SLOPE; }
@@ -419,8 +434,7 @@ const MAT = {
   board: new THREE.MeshLambertMaterial({ color: 0xff7847 }),
   body:  new THREE.MeshLambertMaterial({ color: 0x28418c }),
   pants: new THREE.MeshLambertMaterial({ color: 0x22262e }),
-  skin:  new THREE.MeshLambertMaterial({ color: 0xf2c79b }),
-  skier: new THREE.MeshLambertMaterial({ color: 0xd84a6b })
+  skin:  new THREE.MeshLambertMaterial({ color: 0xf2c79b })
 };
 
 /* Ground segments, recycled */
@@ -483,15 +497,6 @@ function makeRock(){
   const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.9, 0), MAT.rock);
   m.position.y = 0.5; m.scale.y = 0.75; m.userData.obKind = 'rock'; return m;
 }
-function makeSkier(){
-  const g = new THREE.Group();
-  g.userData.obKind = 'skier';
-  const b = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.0, 0.32), MAT.skier); b.position.y = 1.05; g.add(b);
-  const h = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), MAT.skin); h.position.y = 1.8; g.add(h);
-  const bd = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 1.5), MAT.pants); bd.position.y = 0.06; g.add(bd);
-  g.userData.slowSkier = true;
-  return g;
-}
 /* Wall rows (SLALOM zones only): about every 4th chunk gets a row of
    obstacles spanning the course with ONE ~9m gap. Gap centres are
    deterministic and consecutive rows differ by >=10m so the player
@@ -550,8 +555,21 @@ function buildChunk(idx){
       addItem(rowDist, Math.round(off * 10) / 10, rand() < 0.6 ? makeTree() : makeRock());
     }
   }
-  /* --- scattered singles: sparse in speed zones, dense in slalom --- */
-  const n = zone === 'speed' ? Math.floor(rand() * 2) : 2 + Math.floor(rand() * 3);
+  /* --- SPEED zones: an avenue of trees flanks the racing line to the
+     next gate (the line itself stays clear). SLALOM: scattered singles. --- */
+  if (zone === 'speed') {
+    for (const slotD of [start + 9, start + 29]) {
+      if (slotD >= COURSE_LEN) continue;
+      const line = racingLineAt(slotD);
+      for (const side of [-1, 1]) {
+        if (rand() < 0.15) continue;              /* occasional gap in the avenue */
+        const off = line + side * (6 + rand() * 2.5);
+        if (off < -23 || off > 23) continue;
+        addItem(slotD + rand() * 4 - 2, Math.round(off * 10) / 10, makeTree());
+      }
+    }
+  }
+  const n = zone === 'speed' ? 0 : 2 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -569,7 +587,7 @@ function buildChunk(idx){
     /* never plug the wall row's only gap */
     if (hasWall && Math.abs(dist - rowDist) <= 6 && Math.abs(off - gapOff) < 5) continue;
     const kind = rand();
-    addItem(dist, off, kind < 0.55 ? makeTree() : (kind < 0.8 ? makeRock() : makeSkier()));
+    addItem(dist, off, kind < 0.7 ? makeTree() : makeRock());
   }
   g.userData.items = items;
   scene.add(g); return g;
@@ -585,7 +603,6 @@ function layoutChunk(idx){
     const lz = -(o.userData.dist - mid);
     o.position.x = lx; o.position.z = lz;
     o.position.y = (groundY(o.userData.dist) - groundY(mid)) + Math.cos(Math.atan((centerX(o.userData.dist + 2) - centerX(o.userData.dist - 2)) / 4)) * 0;
-    if (o.userData.slowSkier) o.userData.phase = o.userData.dist;
   }
   return g;
 }
@@ -635,7 +652,7 @@ const player = new THREE.Group();
   scene.add(player);
 }
 /* Player-only material clones so crash feedback can fade the player
-   without touching skiers/obstacles that share the base materials. */
+   without touching obstacles that share the base materials. */
 const playerMats = [];
 player.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); playerMats.push(o.material); } });
 
@@ -735,7 +752,7 @@ const S = {
   time: 30, hearts: 3, score: 0, combo: 0, maxCombo: 0, burst: 0,
   dist: 0, speed: 0, maxSpeedSeen: 0,
   latX: 0, latV: 0, jumpY: 0, jumpV: 0, grounded: true,
-  burstTime: 0, invulnTime: 0, hitFlash: 0, countT: 0, popupT: 0, runTime: 0,
+  burstTime: 0, invulnTime: 0, hitFlash: 0, dmgT: 0, countT: 0, popupT: 0, runTime: 0,
   lastZone: 'speed'
 };
 /* Rhythm-carve chain state (see L.updateCarve). */
@@ -802,7 +819,8 @@ function resetRun(){
   S.time = 30; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
-  S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0;
+  S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0; S.dmgT = 0;
+  $('dmg').style.opacity = 0;
   trailPts.length = 0; lastTrailD = -10; trailBreak = true;
   S.lastZone = 'speed';
   carveSt.chain = 0; carveSt.dir = 0; carveSt.time = -9;
@@ -941,6 +959,7 @@ function update(dt){
   /* --- obstacles: collision & near miss --- */
   if (S.invulnTime > 0) S.invulnTime -= dt;
   if (S.hitFlash > 0) S.hitFlash -= dt;
+  if (S.dmgT > 0) S.dmgT -= dt;
   const idx = Math.floor(S.dist / CHUNK);
   for (let ci = idx; ci <= idx + 1; ci++) {
     const chunk = chunks.get(ci); if (!chunk) continue;
@@ -961,8 +980,8 @@ function update(dt){
               emitSpray(player.position.x, player.position.y, player.position.z, 10, 3);
               popup('ROCK! 減速');
             } else {
-              /* trees & skiers: a real crash — lose a heart */
-              L.applyCollision(S); S.invulnTime = 1.2; S.hitFlash = 1.2; carveSt.chain = 0; sndCrash();
+              /* trees: a real crash — lose a heart */
+              L.applyCollision(S); S.invulnTime = 1.2; S.hitFlash = 1.2; S.dmgT = 0.5; carveSt.chain = 0; sndCrash();
               emitSpray(player.position.x, player.position.y, player.position.z, 22, 5);
               popup('CRASH! -0.5秒');
               if (S.hearts <= 0) { endRun('hearts'); return; }
@@ -1011,12 +1030,14 @@ function render(){
   player.rotation.z = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
   player.rotation.y = THREE.MathUtils.clamp(-S.latV * 0.012, -0.3, 0.3);
   player.rotation.x = input.tuck ? 0.25 : 0;
-  /* crash feedback: blink semi-transparent while hitFlash runs */
+  /* crash feedback: hard blink (visible <-> near-invisible) plus a
+     red damage vignette — unmissable even on bright snow */
   const flashing = S.hitFlash > 0;
   for (const m of playerMats) {
-    if (flashing) { m.transparent = true; m.opacity = (Math.floor(S.hitFlash * 10) % 2 === 0) ? 0.3 : 0.65; }
+    if (flashing) { m.transparent = true; m.opacity = (Math.floor(S.hitFlash * 11) % 2 === 0) ? 0.12 : 1.0; }
     else if (m.transparent) { m.transparent = false; m.opacity = 1; }
   }
+  $('dmg').style.opacity = S.dmgT > 0 ? String(Math.min(0.9, S.dmgT / 0.5)) : 0;
 
   const speedRatio = S.speed / tuning.maxSpeed;
   const back = 8.5 + speedRatio * 3.5, up = 4.2 + speedRatio * 1.1;
