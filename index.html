@@ -137,7 +137,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v2.7</p>
+  <p class="ver">v2.8</p>
 </div>
 
 <!-- Result -->
@@ -437,14 +437,20 @@ const peaks = new THREE.Group();
   /* fog:false with hand-picked atmospheric colours — scene fog was
      washing the range out to invisibility against the sky */
   const peakMats = [0xd8e9fa, 0xaecdf0, 0xc4dcf5].map(c => new THREE.MeshLambertMaterial({ color: c, fog: false }));
-  const defs = [[-250, 150, 120], [-170, 95, 80], [-95, 180, 140], [-20, 120, 95], [55, 200, 150], [130, 110, 85], [205, 165, 125], [275, 130, 100], [0, 240, 170]];
+  /* Sized for a portrait phone's narrow horizontal FOV (~±16°): the
+     range is concentrated within ±120m at 245m ahead, anchored to the
+     camera every frame so the summits always sit above the ridge line
+     and the bases stay hidden below it. The previous range (radii up
+     to 240m, spread ±300m) rendered as giant flat walls whose peaks
+     were off the top of the frame. */
+  const defs = [[-118, 36, 70], [-74, 46, 88], [-34, 38, 78], [14, 50, 96], [58, 40, 82], [104, 44, 74]];
   defs.forEach((d, i) => {
     const m = new THREE.Mesh(new THREE.ConeGeometry(d[1], d[2], 5 + (i % 2)), peakMats[i % 3]);
-    m.position.set(d[0], d[2] / 2 - 16, -12 - (i % 3) * 34);
+    m.position.set(d[0], d[2] / 2 - 8, (i % 2) * -16);
     m.rotation.y = i * 1.3;
+    m.frustumCulled = false;
     peaks.add(m);
   });
-  peaks.scale.set(1.2, 1.3, 1);
   scene.add(peaks);
 }
 const clouds = new THREE.Group();
@@ -460,7 +466,7 @@ const clouds = new THREE.Group();
       b.scale.y = 0.42;
       cl.add(b);
     }
-    cl.position.set(-240 + crand() * 480, 46 + crand() * 30, -20 - crand() * 110);
+    cl.position.set(-130 + crand() * 260, -6 + crand() * 14, -8 - crand() * 36);
     clouds.add(cl);
   }
   scene.add(clouds);
@@ -734,6 +740,7 @@ for (let i = 0; i < GATE_DISTANCES.length; i++) {
    white helmet, backpack, graphic orange board. Built from primitives
    but proportioned and colour-blocked to read at game distance. */
 const player = new THREE.Group();
+let riderG, torsoG, armPivotL, armPivotR;
 {
   /* board + canvas-drawn top graphic (orange, black peaks) */
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 512;
@@ -748,32 +755,45 @@ const player = new THREE.Group();
   const board = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.07, 1.7), MAT.board); board.position.y = 0.1; player.add(board);
   const top = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 1.66), new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(cv) }));
   top.rotation.x = -Math.PI / 2; top.position.y = 0.139; player.add(top);
+  /* Rider layering: riderG carries the carve lean + crouch, torsoG
+     carries the sideways-stance twist. The old build stood square to
+     the fall line with symmetric centre-pivot arms (which also left
+     the gloves floating off the sleeves) — it read as a person facing
+     the camera with both hands raised. */
+  riderG = new THREE.Group(); player.add(riderG);
   /* boots — staggered sideways a touch so the stance reads from behind */
   for (const b of [[-0.38, -0.06], [0.38, 0.06]]) {
     const bt = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.13, 0.34), MAT.cloth);
-    bt.position.set(b[1], 0.19, b[0]); player.add(bt);
+    bt.position.set(b[1], 0.19, b[0]); riderG.add(bt);
   }
   /* baggy pants, legs offset sideways so they don't merge into one pillar */
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.58, 0.25), MAT.pants); legL.position.set(-0.07, 0.48, -0.38); legL.rotation.x = 0.32; player.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.07; legR.position.z = 0.38; legR.rotation.x = -0.28; player.add(legR);
-  /* jacket: red torso, black shoulder yoke, hood, red arms, black cuffs */
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.78, 0.33), MAT.jacket); body.position.set(0, 1.08, 0); body.rotation.x = 0.2; player.add(body);
-  const yoke = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.26, 0.35), MAT.cloth); yoke.position.set(0, 1.42, 0.02); yoke.rotation.x = 0.2; player.add(yoke);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.16), MAT.jacket); hood.position.set(0, 1.48, 0.23); player.add(hood);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.62, 0.15), MAT.jacket); armL.position.set(-0.44, 1.08, 0); armL.rotation.z = 0.5; player.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.44; armR.rotation.z = -0.5; player.add(armR);
-  for (const sx of [-0.57, 0.57]) {
-    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.16), MAT.cloth);
-    cuff.position.set(sx, 0.8, 0); player.add(cuff);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.58, 0.25), MAT.pants); legL.position.set(-0.07, 0.48, -0.38); legL.rotation.x = 0.32; riderG.add(legL);
+  const legR = legL.clone(); legR.position.x = 0.07; legR.position.z = 0.38; legR.rotation.x = -0.28; riderG.add(legR);
+  /* torso: hips stay with the board, shoulders twist open downhill */
+  torsoG = new THREE.Group(); torsoG.position.y = 0.72; torsoG.rotation.y = 0.5; riderG.add(torsoG);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.78, 0.33), MAT.jacket); body.position.set(0, 0.36, 0); body.rotation.x = 0.2; torsoG.add(body);
+  const yoke = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.26, 0.35), MAT.cloth); yoke.position.set(0, 0.70, 0.02); yoke.rotation.x = 0.2; torsoG.add(yoke);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.16), MAT.jacket); hood.position.set(0, 0.76, 0.23); torsoG.add(hood);
+  /* arms on shoulder pivots, hanging asymmetrically: lead arm reaches
+     forward-down, trailing arm rests back — never raised */
+  function buildArm(side){
+    const pivot = new THREE.Group(); pivot.position.set(0.36 * side, 0.62, 0);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.62, 0.15), MAT.jacket); arm.position.y = -0.26; pivot.add(arm);
+    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.16), MAT.cloth); cuff.position.y = -0.56; pivot.add(cuff);
+    torsoG.add(pivot); return pivot;
   }
+  armPivotL = buildArm(-1); armPivotR = buildArm(1);
+  armPivotL.rotation.set(0.3, 0, -0.28);
+  armPivotR.rotation.set(-0.25, 0, 0.3);
   /* backpack with red flap */
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.52, 0.17), MAT.cloth); pack.position.set(0, 1.1, 0.28); pack.rotation.x = 0.2; player.add(pack);
-  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.19), MAT.jacket); flap.position.set(0, 1.35, 0.29); flap.rotation.x = 0.2; player.add(flap);
-  /* white helmet, goggle strap, goggles resting on top */
-  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), MAT.skin); neck.position.set(0, 1.56, 0.02); player.add(neck);
-  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), MAT.helmet); helm.position.set(0, 1.74, 0.04); player.add(helm);
-  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.256, 0.256, 0.09, 12), MAT.cloth); strap.position.set(0, 1.76, 0.04); player.add(strap);
-  const gog = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.09, 0.12), MAT.cloth); gog.position.set(0, 1.92, -0.1); player.add(gog);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.52, 0.17), MAT.cloth); pack.position.set(0, 0.38, 0.28); pack.rotation.x = 0.2; torsoG.add(pack);
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.19), MAT.jacket); flap.position.set(0, 0.63, 0.29); flap.rotation.x = 0.2; torsoG.add(flap);
+  /* head counter-twists so the gaze stays on the fall line */
+  const headG = new THREE.Group(); headG.position.set(0, 0.84, 0.02); headG.rotation.y = -0.42; torsoG.add(headG);
+  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), MAT.skin); neck.position.set(0, 0, 0); headG.add(neck);
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), MAT.helmet); helm.position.set(0, 0.18, 0.02); headG.add(helm);
+  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.256, 0.256, 0.09, 12), MAT.cloth); strap.position.set(0, 0.20, 0.02); headG.add(strap);
+  const gog = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.09, 0.12), MAT.cloth); gog.position.set(0, 0.36, -0.12); headG.add(gog);
   scene.add(player);
 }
 /* Soft blob shadow grounding the player (cheaper than shadow maps) */
@@ -1158,6 +1178,17 @@ function render(){
   player.rotation.z = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
   player.rotation.y = THREE.MathUtils.clamp(-S.latV * 0.012, -0.3, 0.3);
   player.rotation.x = input.tuck ? 0.25 : 0;
+  /* Rider body language, from real carving footage: the body leans
+     further than the board and compresses into the turn, shoulders
+     open more, and the downhill arm reaches toward the snow while
+     the uphill arm settles. */
+  const leanZ = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
+  riderG.rotation.z = leanZ * 0.7;
+  riderG.position.y = -Math.min(0.16, Math.abs(S.latV) * 0.004);
+  torsoG.rotation.y = 0.5 + THREE.MathUtils.clamp(-S.latV * 0.008, -0.22, 0.22);
+  torsoG.rotation.x = input.tuck ? 0.2 : 0.04;
+  armPivotL.rotation.z = -0.28 - leanZ * 0.55;
+  armPivotR.rotation.z = 0.3 - leanZ * 0.55;
   /* crash feedback: hard blink (visible <-> near-invisible) plus a
      red damage vignette — unmissable even on bright snow */
   const flashing = S.hitFlash > 0;
@@ -1177,9 +1208,10 @@ function render(){
   /* subtle camera roll with lateral velocity for a carving lean feel */
   camera.rotateZ(THREE.MathUtils.clamp(-S.latV * 0.0015, -0.03, 0.03));
 
-  /* keep the mountain range and clouds ahead of the player */
-  peaks.position.set(centerX(S.dist) * 0.5, groundY(S.dist) - 4, -S.dist - 190);
-  clouds.position.set(centerX(S.dist) * 0.3, groundY(S.dist), -S.dist - 180);
+  /* Background is camera-anchored: fixed geometry relative to the eye,
+     so the range can never sink under the slope or leave the frame. */
+  peaks.position.set(camera.position.x * 0.92 + centerX(S.dist) * 0.08, camera.position.y - 64, camera.position.z - 245);
+  clouds.position.set(camera.position.x * 0.9, camera.position.y + 30, camera.position.z - 215);
   /* blob shadow tracks the player, shrinking/fading as they jump */
   blobShadow.position.set(px, groundY(S.dist) + 0.03, -S.dist);
   const shS = Math.max(0.45, 1 - S.jumpY * 0.09);
