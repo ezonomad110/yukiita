@@ -49,12 +49,51 @@ function fresh() { return { time: 20, hearts: 2, score: 0, combo: 5, maxCombo: 5
   s.burst = 95; L.addNearMiss(s);
   eq(s.burst, 100, 'burst gauge capped at 100');
 }
-/* tuning copy-string format: fixed key order, single spaces */
+/* tuning copy-string format: fixed key order, single spaces, cruise after accel */
 {
-  const t = { gravity: 22, jumpPower: 9, brake: 26, carve: 22, accel: 14, maxSpeed: 40 };
-  eq(L.formatTuning(t), 'maxSpeed=40 accel=14 carve=22 brake=26 jumpPower=9 gravity=22', 'formatTuning key order and format');
+  const t = { gravity: 70, jumpPower: 20, brake: 80, carve: 80, cruise: 140, accel: 120, maxSpeed: 240 };
+  eq(L.formatTuning(t), 'maxSpeed=240 accel=120 cruise=140 carve=80 brake=80 jumpPower=20 gravity=70', 'formatTuning key order and format');
 }
-eq(L.TUNING_KEYS, ['maxSpeed', 'accel', 'carve', 'brake', 'jumpPower', 'gravity'], 'tuning keys list');
+eq(L.TUNING_KEYS, ['maxSpeed', 'accel', 'cruise', 'carve', 'brake', 'jumpPower', 'gravity'], 'tuning keys list');
+
+/* gate pass: opening is |latX - off| <= 4 */
+{
+  eq(L.isGatePass(0, 0), true, 'gate pass centered');
+  eq(L.isGatePass(4, 0), true, 'gate pass at edge (+4)');
+  eq(L.isGatePass(-4, 0), true, 'gate pass at edge (-4)');
+  eq(L.isGatePass(5, 0), false, 'gate miss just outside');
+  eq(L.isGatePass(17, 14), true, 'gate pass offset gate');
+  eq(L.isGatePass(18, 14), true, 'gate pass offset gate at edge');
+  eq(L.isGatePass(19, 14), false, 'gate miss offset gate');
+  eq(L.isGatePass(-20, -18), true, 'gate pass negative offset');
+  eq(L.isGatePass(10, -14), false, 'gate miss wrong side');
+}
+/* gate side label for the HUD */
+{
+  eq(L.gateSideLabel(-14), '左寄り', 'gate side left');
+  eq(L.gateSideLabel(-4), '左寄り', 'gate side left (beyond -3)');
+  eq(L.gateSideLabel(0), '中央', 'gate side center');
+  eq(L.gateSideLabel(3), '中央', 'gate side center (at +3)');
+  eq(L.gateSideLabel(11), '右寄り', 'gate side right');
+}
+/* effective cap: cruise coasting, tuck x1.12, burst x1.35 (burst wins) */
+{
+  const t = { maxSpeed: 200, cruise: 120 };
+  eq(L.effectiveCap(t, false, false), 120, 'cap is cruise when coasting');
+  eq(Math.round(L.effectiveCap(t, true, false) * 100) / 100, 224, 'cap is maxSpeed x1.12 when tucking');
+  eq(Math.round(L.effectiveCap(t, false, true) * 100) / 100, 270, 'cap is maxSpeed x1.35 in burst');
+  eq(Math.round(L.effectiveCap(t, true, true) * 100) / 100, 270, 'burst cap wins over tuck');
+}
+/* rhythm carve: alternation within 1.6s chains, late alternation restarts */
+{
+  const st = { chain: 0, dir: 0, time: -9 };
+  eq(L.updateCarve(st, 1, 0), 0, 'first carve direction gives no chain');
+  eq(L.updateCarve(st, -1, 1.0), 1, 'quick alternation starts chain x1');
+  eq(L.updateCarve(st, 1, 2.0), 2, 'second quick alternation chains x2');
+  eq(L.updateCarve(st, 1, 2.4), 0, 'same direction does not chain');
+  eq(L.updateCarve(st, -1, 4.2), 1, 'late alternation (>1.6s) restarts at x1');
+  eq(L.updateCarve(st, 0, 4.5), 0, 'no input does not chain');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
