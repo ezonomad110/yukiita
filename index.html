@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.5</p>
+  <p class="ver">v3.6</p>
 </div>
 
 <!-- Result -->
@@ -332,6 +332,9 @@ function loadTuning(){
   return t;
 }
 const tuning = loadTuning();
+/* BURST is parked for now (user call): button hidden, activation
+   frozen. Flip to true to bring the whole feature back. */
+const BURST_UI = false;
 function saveTuning(){ try { localStorage.setItem('yukiita_tuning', JSON.stringify(tuning)); } catch(e) {} }
 
 /* Build tuning UI (each slider writes ONLY its own key). */
@@ -667,6 +670,9 @@ function buildChunk(idx){
     obj.position.set(off, 0, 0);
     obj.userData.dist = dist; obj.userData.off = off;
     obj.userData.passed = false;
+    /* powder zone: trees are scenery only — they sell the speed but
+       never block the ride (gates stay live, see collision loop) */
+    obj.userData.ghost = L.zoneTypeAt(dist) === 'steep';
     g.add(obj); items.push(obj);
   }
   /* --- section type for this chunk (from its mid distance) --- */
@@ -1047,10 +1053,11 @@ $('btn-burst').addEventListener('click', () => activateBurst());
 
 function onJumpOrBurst(){
   if (S.mode !== 'run') return;
-  if (S.burst >= 100 && S.burstTime <= 0) { activateBurst(); return; }
+  if (BURST_UI && S.burst >= 100 && S.burstTime <= 0) { activateBurst(); return; }
   if (S.grounded) { S.jumpV = tuning.jumpPower; S.grounded = false; }
 }
 function activateBurst(){
+  if (!BURST_UI) return;
   if (S.mode !== 'run' || S.burst < 100 || S.burstTime > 0) return;
   S.burst = 0; S.burstTime = 5;
   $('gold').style.opacity = 1;
@@ -1227,6 +1234,7 @@ function update(dt){
     const chunk = chunks.get(ci); if (!chunk) continue;
     for (const o of chunk.userData.items) {
       if (o.userData.passed) continue;
+      if (o.userData.ghost) continue;   /* steep-zone scenery trees */
       const od = o.userData.dist;
       if (od < prevDist - 2 || od > S.dist + 2) continue;
       const oWorldX = centerX(od) + o.userData.off;
@@ -1463,7 +1471,7 @@ function renderHUD(){
   if (S.burstTime > 0) { bl.textContent = 'BURST中!!'; bl.classList.add('ready'); }
   else if (S.burst >= 100) { bl.textContent = 'BURST READY!'; bl.classList.add('ready'); }
   else { bl.textContent = 'BURST'; bl.classList.remove('ready'); }
-  $('btn-burst').classList.toggle('hidden', !(S.mode === 'run' && S.burst >= 100 && S.burstTime <= 0));
+  $('btn-burst').classList.toggle('hidden', !(BURST_UI && S.mode === 'run' && S.burst >= 100 && S.burstTime <= 0));
 }
 
 /* ================= Main loop (dt-based) ================= */
