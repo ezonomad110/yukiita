@@ -138,7 +138,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.0</p>
+  <p class="ver">v3.1</p>
 </div>
 
 <!-- Result -->
@@ -689,7 +689,8 @@ function buildChunk(idx){
       const line = racingLineAt(slotD);
       for (const side of [-1, 1]) {
         if (rand() < 0.15) continue;              /* occasional gap in the avenue */
-        const off = line + side * (6 + rand() * 2.5);
+        /* the steep zone runs much faster, so its avenue stands wider */
+        const off = line + side * (zone === 'steep' ? 9 + rand() * 2 : 6 + rand() * 2.5);
         if (off < -23 || off > 23) continue;
         addItem(slotD + rand() * 4 - 2, Math.round(off * 10) / 10, makeTree());
       }
@@ -1095,10 +1096,11 @@ function update(dt){
      cruise cap (top speed without accelerating). Above the current cap
      there is no positive acceleration, only a smooth glide-down drag,
      so releasing tuck at 240 glides toward cruise instead of snapping. */
-  /* The steep zone also raises every cap by up to +30% at its heart,
-     so the slope force translates into real extra speed instead of
-     fighting the glide-down drag the whole way down. */
-  const capNow = L.effectiveCap(tuning, input.tuck, inBurst) * (1 + 0.3 * steepW(S.dist));
+  /* The steep zone raises the cap by up to +30% at its heart, so the
+     slope force becomes real extra speed — but it does NOT stack with
+     BURST (the two multipliers together pushed the cap to 1.75x and
+     the zone turned into a reaction test at 1,300+ km/h). */
+  const capNow = L.effectiveCap(tuning, input.tuck, inBurst) * (inBurst ? 1 : 1 + 0.3 * steepW(S.dist));
   let a = -S.speed * 0.02;                               /* mild drag */
   /* Slope force from the rolling profile: pitches steeper than the
      base grade feed speed, rises bleed it — pumping over the whoops. */
@@ -1234,7 +1236,14 @@ function render(){
   player.position.set(px, py, -S.dist);
   player.rotation.z = THREE.MathUtils.clamp(-S.latV * 0.022, -0.5, 0.5);
   player.rotation.y = THREE.MathUtils.clamp(-S.latV * 0.012, -0.3, 0.3);
-  player.rotation.x = input.tuck ? 0.25 : 0;
+  /* Pitch with the local grade beyond the base slope: the board used
+     to stay level while the snow fell away, so on steep pitches the
+     rear half of the board and the legs sank into the slope (up to
+     ~28cm in the steep heart, plus the carve crouch). Base-slope
+     areas keep the long-standing look; steeper ground tips the
+     rider forward onto the fall line. */
+  const gradeHere = (groundY(S.dist - 2) - groundY(S.dist + 2)) / 4;
+  player.rotation.x = (input.tuck ? 0.25 : 0) - (Math.atan(gradeHere) - Math.atan(SLOPE));
   /* Rider body language, from real carving footage: the body leans
      further than the board and compresses into the turn, shoulders
      open more, and the downhill arm reaches toward the snow while
