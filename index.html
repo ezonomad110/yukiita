@@ -60,6 +60,16 @@
     background:rgba(0,0,0,.3); color:#fff; border:1px solid rgba(255,255,255,.4); width:42px; height:42px; border-radius:50%; font-size:16px; cursor:pointer; }
   #popup { position:absolute; top:30%; left:50%; transform:translateX(-50%); font-size:30px; font-weight:900; color:#ffd94d;
     text-shadow:0 3px 14px rgba(0,0,0,.55); opacity:0; transition:opacity .15s; white-space:nowrap; }
+  /* zone-entry banner: big and held ~2.3s — the old 0.75s popup was
+     gone before it could be read at speed */
+  #zone-banner { position:absolute; top:21%; left:50%; transform:translateX(-50%) scale(.92); text-align:center; z-index:11;
+    opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; }
+  #zone-banner.show { opacity:1; transform:translateX(-50%) scale(1); }
+  #zone-banner .zb-title { font-size:46px; font-weight:900; letter-spacing:.08em; text-shadow:0 4px 22px rgba(0,0,0,.6); white-space:nowrap; }
+  #zone-banner .zb-sub { font-size:17px; font-weight:700; margin-top:2px; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,.65); white-space:nowrap; }
+  #zone-banner.speed .zb-title { color:#ffd94d; }
+  #zone-banner.slalom .zb-title { color:#6ee7ff; }
+  #zone-banner.steep .zb-title { color:#ff9a3d; }
   #countdown { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:15; pointer-events:none;
     font-size:120px; font-weight:900; text-shadow:0 6px 40px rgba(0,0,0,.6); }
   #gold { position:fixed; inset:0; z-index:5; pointer-events:none; background:radial-gradient(ellipse at center, rgba(255,190,0,0) 55%, rgba(255,175,0,.45) 100%); opacity:0; transition:opacity .25s; }
@@ -118,13 +128,14 @@
     <div id="burst-label">BURST</div>
   </div>
   <div id="popup"></div>
+  <div id="zone-banner"><div class="zb-title"></div><div class="zb-sub"></div></div>
 </div>
 <div id="countdown" class="hidden"></div>
 <div id="gate-marker" class="hidden"><div id="gate-arrow">▼</div><div id="gate-label">GATE 0m</div></div>
 
 <!-- Touch controls -->
 <div id="touch" class="hidden">
-  <button class="tbtn" id="btn-tuck">TUCK</button>
+  <button class="tbtn" id="btn-tuck">JUMP</button>
   <button class="tbtn" id="btn-jump">JUMP</button>
 </div>
 <button id="btn-burst" class="hidden">BURST</button>
@@ -138,7 +149,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.6</p>
+  <p class="ver">v3.7</p>
 </div>
 
 <!-- Result -->
@@ -1046,9 +1057,12 @@ function bindHold(el, prop){
   el.addEventListener('touchstart', on, { passive:false }); el.addEventListener('mousedown', on);
   el.addEventListener('touchend', off); el.addEventListener('touchcancel', off); el.addEventListener('mouseup', off); el.addEventListener('mouseleave', off);
 }
-bindHold($('btn-tuck'), 'tuck');
-$('btn-jump').addEventListener('touchstart', e => { e.preventDefault(); onJumpOrBurst(); }, { passive:false });
-$('btn-jump').addEventListener('mousedown', () => onJumpOrBurst());
+/* JUMP buttons on BOTH sides (the left one used to be TUCK; tuck
+   still works from the keyboard). Same action either side. */
+for (const b of [$('btn-tuck'), $('btn-jump')]) {
+  b.addEventListener('touchstart', e => { e.preventDefault(); onJumpOrBurst(); }, { passive:false });
+  b.addEventListener('mousedown', () => onJumpOrBurst());
+}
 $('btn-burst').addEventListener('click', () => activateBurst());
 
 function onJumpOrBurst(){
@@ -1069,6 +1083,16 @@ function popup(text){
   const p = $('popup'); p.textContent = text; p.style.opacity = 1;
   if (popupTimer) clearTimeout(popupTimer);
   popupTimer = setTimeout(() => { p.style.opacity = 0; }, 750);
+}
+let zbTimer = null;
+function zoneBanner(title, sub, cls){
+  const b = $('zone-banner');
+  b.querySelector('.zb-title').textContent = title;
+  b.querySelector('.zb-sub').textContent = sub;
+  b.className = ''; void b.offsetWidth;   /* restart the transition */
+  b.className = 'show ' + cls;
+  if (zbTimer) clearTimeout(zbTimer);
+  zbTimer = setTimeout(() => { b.classList.remove('show'); }, 2300);
 }
 
 function resetRun(){
@@ -1142,7 +1166,9 @@ function update(dt){
   const zoneNow = L.zoneTypeAt(S.dist);
   if (zoneNow !== S.lastZone) {
     S.lastZone = zoneNow;
-    popup(zoneNow === 'speed' ? 'SPEED ZONE — カービングで攻めろ' : zoneNow === 'steep' ? 'STEEP ZONE — 深雪を刻め' : 'SLALOM ZONE — 障害物を避けろ');
+    if (zoneNow === 'speed') zoneBanner('SPEED ZONE', 'カービングで攻めろ', 'speed');
+    else if (zoneNow === 'steep') zoneBanner('STEEP ZONE', '深雪を刻め', 'steep');
+    else zoneBanner('SLALOM ZONE', '障害物を避けろ', 'slalom');
   }
 
   /* --- speed --- */
@@ -1288,6 +1314,16 @@ function update(dt){
   if (S.grounded && Math.abs(S.latV) > 6 && S.speed > 10) {
     const n = Math.min(10, Math.round(2 + Math.abs(S.latV) * 0.18 + S.speed * 0.04));
     emitSpray(player.position.x - Math.sign(S.latV) * 0.3, player.position.y, player.position.z + 0.6, n, 2.2 + Math.abs(S.latV) * 0.06);
+  }
+  /* --- hard carve throws up powder in ANY zone (like the powder
+     course): the sharper the cut, the bigger the plume --- */
+  if (S.grounded && Math.abs(S.latV) > 13 && S.speed > 40) {
+    const sd = Math.sign(S.latV);
+    const nP = Math.min(9, Math.round((Math.abs(S.latV) - 11) * 0.5));
+    for (let k = 0; k < nP; k++) {
+      emitPowder(player.position.x + sd * (0.3 + Math.random() * 0.8), player.position.y + 0.4 + Math.random() * 0.7, player.position.z + 0.7,
+        sd * (1.5 + Math.random() * 3), 2.2 + Math.random() * 3, 2.5 + Math.random() * 4);
+    }
   }
   /* --- deep-powder storm: in the steep zone the rider runs sunken
      (by design — see render) and the air itself fills with powder:
