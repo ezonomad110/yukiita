@@ -488,7 +488,7 @@ function makeSkier(){
    obstacles spanning the course with ONE ~9m gap. Gap centres are
    deterministic and consecutive rows differ by >=10m so the player
    must really steer. */
-const WALL_EVERY = 4, WALL_PHASE = 2;
+const WALL_EVERY = 5, WALL_PHASE = 2;
 function isWallChunk(idx){
   if (idx % WALL_EVERY !== WALL_PHASE) return false;
   const start = idx * CHUNK;
@@ -543,7 +543,7 @@ function buildChunk(idx){
     }
   }
   /* --- scattered singles: sparse in speed zones, dense in slalom --- */
-  const n = zone === 'speed' ? Math.floor(rand() * 2) : 4 + Math.floor(rand() * 3);
+  const n = zone === 'speed' ? Math.floor(rand() * 2) : 3 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -676,7 +676,7 @@ let best = 0;
 try { best = parseInt(localStorage.getItem('yukiita_best') || '0', 10) || 0; } catch(e) {}
 $('best-val').textContent = best.toLocaleString();
 
-const input = { left:false, right:false, tuck:false, brake:false, dragX:null, dragTarget:null };
+const input = { left:false, right:false, tuck:false, brake:false, dragX:null, dragVec:0 };
 const KEYMAP = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right', ArrowUp:'tuck', KeyW:'tuck', ArrowDown:'brake', KeyS:'brake' };
 window.addEventListener('keydown', e => {
   if (KEYMAP[e.code] !== undefined) { input[KEYMAP[e.code]] = true; e.preventDefault(); }
@@ -685,15 +685,20 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { if (KEYMAP[e.code] !== undefined) input[KEYMAP[e.code]] = false; });
 
-/* Touch: horizontal drag steers; buttons for tuck / jump / burst */
-let dragStartX = 0, dragStartLat = 0;
+/* Touch: horizontal drag is a carve stick — while the finger stays
+   displaced from where it touched down, the board keeps carving that
+   way (proportional to displacement); re-centring or lifting stops it. */
+let dragStartX = 0;
 const canvas = $('game-canvas');
-canvas.addEventListener('touchstart', e => { const t = e.changedTouches[0]; dragStartX = t.clientX; dragStartLat = S.latX; input.dragX = t.clientX; }, { passive:true });
+canvas.addEventListener('touchstart', e => { const t = e.changedTouches[0]; dragStartX = t.clientX; input.dragX = t.clientX; input.dragVec = 0; }, { passive:true });
 canvas.addEventListener('touchmove', e => {
   const t = e.changedTouches[0]; input.dragX = t.clientX;
-  input.dragTarget = dragStartLat + (t.clientX - dragStartX) * 0.045;
+  const dx = t.clientX - dragStartX;
+  input.dragVec = Math.abs(dx) < 8 ? 0 : THREE.MathUtils.clamp(dx / 70, -1, 1);
 }, { passive:true });
-canvas.addEventListener('touchend', () => { input.dragX = null; input.dragTarget = null; }, { passive:true });
+function dragEnd(){ input.dragX = null; input.dragVec = 0; }
+canvas.addEventListener('touchend', dragEnd, { passive:true });
+canvas.addEventListener('touchcancel', dragEnd, { passive:true });
 function bindHold(el, prop){
   const on = e => { e.preventDefault(); el.classList.add('on'); input[prop] = true; };
   const off = () => { el.classList.remove('on'); input[prop] = false; };
@@ -825,15 +830,10 @@ function update(dt){
   let latInput = 0;
   if (input.left) latInput -= 1;
   if (input.right) latInput += 1;
+  if (input.dragVec) latInput = input.dragVec;   /* held drag keeps carving */
   const carveEff = tuning.carve * (input.tuck ? 0.55 : 1) * (input.brake ? 1.25 : 1);
-  if (input.dragTarget !== null && input.dragTarget !== undefined) {
-    const target = THREE.MathUtils.clamp(input.dragTarget, -22, 22);
-    S.latV += (target - S.latX) * carveEff * 0.55 * dt * 10 * 0.1;
-    S.latV *= Math.max(0, 1 - 8 * dt);
-  } else {
-    S.latV += latInput * carveEff * dt;
-    S.latV *= Math.max(0, 1 - (latInput === 0 ? 7 : 2.2) * dt);
-  }
+  S.latV += latInput * carveEff * dt;
+  S.latV *= Math.max(0, 1 - (latInput === 0 ? 7 : 2.2) * dt);
   S.latX += S.latV * dt;
   const limit = 24;
   if (S.latX > limit) { S.latX = limit; S.latV = Math.min(0, S.latV); }
@@ -889,7 +889,7 @@ function update(dt){
   /* --- rhythm carve: alternating hard carves build a chain --- */
   if (carveSt.chain > 0 && S.runTime - carveSt.time > 2.5) carveSt.chain = 0;
   if (S.grounded && Math.abs(S.latV) > 6) {
-    let cs = latInput;
+    let cs = Math.sign(latInput);
     if (cs === 0) cs = Math.sign(S.latV);
     if (cs !== 0) {
       const gained = L.updateCarve(carveSt, cs, S.runTime);
