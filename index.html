@@ -160,7 +160,7 @@
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.1</p>
+  <p class="ver">v4.2</p>
 </div>
 
 <!-- Result -->
@@ -372,6 +372,10 @@ const tuning = loadTuning();
 /* BURST is parked for now (user call): button hidden, activation
    frozen. Flip to true to bring the whole feature back. */
 const BURST_UI = false;
+/* Tuning mode hidden (user call, 2026-11-02): the decided values are
+   baked in as defaults, so the entry buttons stay out of the UI.
+   Flip to true to bring the sliders back. */
+const TUNING_UI = false;
 
 /* Courses: the v3.9 balance is the beginner course (user call,
    after a 29-seconds-to-spare clear). The middle course is a
@@ -420,8 +424,9 @@ $('btn-copy').addEventListener('click', async () => {
   catch(e) { $('copy-msg').textContent = text; }
 });
 $('btn-reset').addEventListener('click', () => { const d = defaultTuning(); for (const k of L.TUNING_KEYS) tuning[k] = d[k]; saveTuning(); refreshTuningUI(); $('copy-msg').textContent = '初期値に戻しました'; });
+if (!TUNING_UI) { $('btn-tune-title').style.display = 'none'; $('btn-tune-pause').style.display = 'none'; }
 let tuningReturn = 'title';
-function openTuning(from){ tuningReturn = from; $('tuning').classList.remove('hidden'); }
+function openTuning(from){ if (!TUNING_UI) return; tuningReturn = from; $('tuning').classList.remove('hidden'); }
 function closeTuning(){
   $('tuning').classList.add('hidden');
   if (tuningReturn === 'pause') $('pause').classList.remove('hidden');
