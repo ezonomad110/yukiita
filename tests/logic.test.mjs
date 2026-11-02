@@ -29,8 +29,28 @@ function fresh() { return { time: 20, hearts: 2, score: 0, combo: 5, maxCombo: 5
   eq(s.score, 160, 'checkpoint adds score');
 }
 {
+  const s = fresh(); L.applyCheckpoint(s, 3);
+  eq(s.time, 23, 'checkpoint accepts a per-course bonus');
+}
+{
   const s = fresh(); s.hearts = 3; L.applyCheckpoint(s);
   eq(s.hearts, 3, 'hearts capped at 3');
+}
+/* course layouts: default is the beginner course; the middle
+   course reverses sections, moves the steep stretch late, and
+   swings its slalom gates wide */
+{
+  eq(L.zoneTypeAt(100), 'speed', 'easy layout starts with speed');
+  eq(L.zoneTypeAt(4500), 'steep', 'easy steep at 3600-5400');
+  L.setLayout({ firstSlalom: true, steepStart: 5400, steepEnd: 7200, slalomWide: true });
+  eq(L.zoneTypeAt(100), 'slalom', 'normal layout starts with slalom');
+  eq(L.zoneTypeAt(1000), 'speed', 'normal section 1 is speed');
+  eq(L.zoneTypeAt(4500), 'speed', 'normal section 5 is speed (no steep at 4500)');
+  eq(L.zoneTypeAt(3800), 'slalom', 'normal section 4 is slalom');
+  eq(L.zoneTypeAt(6000), 'steep', 'normal steep at 5400-7200');
+  eq(Math.abs(L.gateOffset(100, 0)) >= 11, true, 'normal slalom gates swing wide');
+  L.setLayout(null);
+  eq(L.zoneTypeAt(100), 'speed', 'layout reset restores easy');
 }
 /* collision: -1 heart, -0.5s, speed x0.45 */
 {

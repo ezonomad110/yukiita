@@ -28,6 +28,11 @@
   .sub-btn { margin-top:14px; background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.35);
     font-size:14px; padding:10px 22px; border-radius:999px; cursor:pointer; }
   .sub-btn:active { transform:scale(.97); }
+  #course-row { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+  .course-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
+    padding:10px 26px; border-radius:999px; cursor:pointer; }
+  .course-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
+  .course-desc { margin-top:10px; font-size:12.5px; opacity:.85; min-height:1.4em; }
   #title .howto { margin-top:26px; font-size:12px; line-height:1.9; opacity:.75; }
 
   /* ---------- HUD ---------- */
@@ -142,14 +147,20 @@
 
 <!-- Title -->
 <div id="title" class="overlay">
-  <div class="loc">Summit · Course 1</div>
+  <div class="loc" id="title-loc">Summit · 初級コース</div>
   <h1>雪板<span class="en">YUKIITA</span></h1>
-  <p class="mission">山頂から麓のロッジへ、制限時間内に滑り降りろ！<br>ゲート通過で +4秒＆ハート回復。</p>
+  <p class="mission">山頂から麓のロッジへ、制限時間内に滑り降りろ！<br><span id="mission-sec">ゲート通過で +4秒＆ハート回復。</span></p>
+  <div id="course-row">
+    <button class="course-btn" data-course="easy">初級</button>
+    <button class="course-btn" data-course="normal">中級</button>
+    <button class="course-btn" data-course="hard">上級</button>
+  </div>
+  <p class="course-desc" id="course-desc"></p>
   <div class="best">BEST <b id="best-val">0</b></div>
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v3.9</p>
+  <p class="ver">v4.1</p>
 </div>
 
 <!-- Result -->
@@ -161,6 +172,7 @@
     <div>距離 <b id="r-dist">0 m</b></div>
     <div>最高速度 <b id="r-speed">0 km/h</b></div>
     <div>最大コンボ <b id="r-combo">×0</b></div>
+    <div>コース <b id="r-course">初級</b></div>
   </div>
   <button class="big-btn" id="btn-retry">もう一度</button>
   <button class="sub-btn" id="btn-totitle">タイトルへ</button>
@@ -200,8 +212,8 @@ var YukiitaLogic = (function () {
   var NEAR_MISS_BURST = 14;
   var MAX_HEARTS = 3;
 
-  function applyCheckpoint(s) {
-    s.time += CHECKPOINT_BONUS_SEC;
+  function applyCheckpoint(s, bonusSec) {
+    s.time += (bonusSec === undefined ? CHECKPOINT_BONUS_SEC : bonusSec);
     s.hearts = Math.min(MAX_HEARTS, s.hearts + 1);
     s.combo = 0;
     s.score += CHECKPOINT_SCORE;
@@ -247,10 +259,23 @@ var YukiitaLogic = (function () {
   /* The steep showcase stretch replaces whatever sections it spans:
      a long, steep carving descent mid-course. */
   var STEEP_START = 3600, STEEP_END = 5400;
+  /* Per-course layout (set via setLayout): which section type comes
+     first, where the steep stretch sits, and whether slalom gates
+     swing wide like speed gates. Default = the beginner course. */
+  var LAYOUT = { firstSlalom: false, steepStart: STEEP_START, steepEnd: STEEP_END, slalomWide: false };
+  function setLayout(l) {
+    LAYOUT = {
+      firstSlalom: !!(l && l.firstSlalom),
+      steepStart: l && l.steepStart !== undefined ? l.steepStart : STEEP_START,
+      steepEnd: l && l.steepEnd !== undefined ? l.steepEnd : STEEP_END,
+      slalomWide: !!(l && l.slalomWide)
+    };
+  }
   function zoneTypeAt(dist) {
-    if (dist >= STEEP_START && dist < STEEP_END) return "steep";
+    if (dist >= LAYOUT.steepStart && dist < LAYOUT.steepEnd) return "steep";
     var sec = Math.floor(Math.max(0, dist) / SECTION_LEN);
-    return sec % 2 === 0 ? "speed" : "slalom";
+    var isSpeed = (sec % 2 === 0) !== LAYOUT.firstSlalom;
+    return isSpeed ? "speed" : "slalom";
   }
   /* Gate offsets depend on the gate's zone. The second argument is the
      gate's ordinal WITHIN its zone (0-based count of prior gates in the
@@ -260,7 +285,7 @@ var YukiitaLogic = (function () {
   var SPEED_GATE_OFFSETS = [14, -14, 18, -18, 11, -11, 16, -16];
   var SLALOM_GATE_OFFSETS = [0, 4, -3, 5, -5, 0];
   function gateOffset(dist, zoneIndex) {
-    var cyc = zoneTypeAt(dist) === "slalom" ? SLALOM_GATE_OFFSETS : SPEED_GATE_OFFSETS;
+    var cyc = (zoneTypeAt(dist) === "slalom" && !LAYOUT.slalomWide) ? SLALOM_GATE_OFFSETS : SPEED_GATE_OFFSETS;
     var i = ((zoneIndex % cyc.length) + cyc.length) % cyc.length;
     return cyc[i];
   }
@@ -306,6 +331,7 @@ var YukiitaLogic = (function () {
     STEEP_START: STEEP_START,
     STEEP_END: STEEP_END,
     zoneTypeAt: zoneTypeAt,
+    setLayout: setLayout,
     gateOffset: gateOffset,
     markerDir: markerDir,
     updateCarve: updateCarve
@@ -346,6 +372,32 @@ const tuning = loadTuning();
 /* BURST is parked for now (user call): button hidden, activation
    frozen. Flip to true to bring the whole feature back. */
 const BURST_UI = false;
+
+/* Courses: the v3.9 balance is the beginner course (user call,
+   after a 29-seconds-to-spare clear). The middle course is a
+   DIFFERENT mountain: 12,000m, sections reversed, the steep stretch
+   late, slalom gates swinging wide, denser walls — and at night.
+   The upper course reuses the beginner layout with hard time. */
+const COURSES = {
+  easy:   { label: '初級', len: 9000, startTime: 20, gateSec: 4, layout: null, wallEvery: 5, night: false },
+  normal: { label: '中級', len: 12000, startTime: 15, gateSec: 3, wallEvery: 4, night: true,
+            layout: { firstSlalom: true, steepStart: 5400, steepEnd: 7200, slalomWide: true } },
+  hard:   { label: '上級', len: 9000, startTime: 10, gateSec: 3, layout: null, wallEvery: 5, night: false },
+};
+let courseKey = 'easy';
+try { const c = localStorage.getItem('yukiita-course'); if (c && COURSES[c]) courseKey = c; } catch (e) {}
+let course = COURSES[courseKey];
+let worldReady = false;
+function setCourse(k){
+  courseKey = k; course = COURSES[k];
+  try { localStorage.setItem('yukiita-course', k); } catch (e) {}
+  document.querySelectorAll('.course-btn').forEach(b => b.classList.toggle('sel', b.dataset.course === k));
+  $('mission-sec').textContent = 'ゲート通過で +' + course.gateSec + '秒＆ハート回復。';
+  $('title-loc').textContent = (course.night ? 'Night Summit' : 'Summit') + ' · ' + course.label + 'コース';
+  if (worldReady) rebuildWorld();
+}
+document.querySelectorAll('.course-btn').forEach(b => b.addEventListener('click', () => setCourse(b.dataset.course)));
+setCourse(courseKey);
 function saveTuning(){ try { localStorage.setItem('yukiita_tuning', JSON.stringify(tuning)); } catch(e) {} }
 
 /* Build tuning UI (each slider writes ONLY its own key). */
@@ -393,18 +445,21 @@ function sndCrash(){ blip(90, .25, 'square', .22); blip(55, .3, 'sine', .25); }
 function sndNear(){ blip(1560, .06, 'triangle', .07); }
 
 /* ================= Three.js scene ================= */
-const COURSE_LEN = 9000;
+let courseLen = 9000;
 const SLOPE = 0.16;                       /* height drop per metre travelled */
 const GATE_EVERY_MIN = 350, GATE_EVERY_MAX = 450;
-const GATE_DISTANCES = [];
-{ let d = 400; let i = 0; while (d < COURSE_LEN - 120) { GATE_DISTANCES.push(d); d += 350 + ((i * 53) % 100); i++; } }
-/* Gate offsets depend on the gate's zone (see L.gateOffset): speed-zone
-   gates swing wide, slalom-zone gates stay near the centre. Offsets are
-   indexed by each gate's ordinal within its own zone and precomputed
-   into a dist -> offset map used by gates and obstacle placement. */
+/* Gate distances/offsets are rebuilt per course (see rebuildWorld):
+   distances step 350-450m from 400m to near the goal; offsets are
+   indexed by each gate's ordinal within its own zone (see
+   L.gateOffset) and precomputed into maps used by the gate objects
+   and by obstacle placement. */
+let GATE_DISTANCES = [];
 const GATE_OFF_MAP = new Map();
 const GATE_ZONE_MAP = new Map();
-{
+function rebuildGateData(){
+  GATE_DISTANCES = [];
+  { let d = 400; let i = 0; while (d < courseLen - 120) { GATE_DISTANCES.push(d); d += 350 + ((i * 53) % 100); i++; } }
+  GATE_OFF_MAP.clear(); GATE_ZONE_MAP.clear();
   let sp = 0, sl = 0;
   for (const d of GATE_DISTANCES) {
     const zone = L.zoneTypeAt(d);
@@ -436,16 +491,18 @@ function groundY(dist){ return -dist * SLOPE - steepDrop(dist) + rollAt(dist); }
    integral, so groundY stays a pure C1 function and every system
    keyed to groundY (mesh, objects, camera, slope physics) agrees.
    After the zone the course simply sits lower by the total drop. */
-const STEEP_EXTRA = 0.17, STEEP_LEN = L.STEEP_END - L.STEEP_START;
+const STEEP_EXTRA = 0.17;
+let steepRange = { start: 3600, end: 5400 };
+let STEEP_LEN = 1800;
 function steepW(dist){
-  if (dist <= L.STEEP_START || dist >= L.STEEP_END) return 0;
-  const t = (dist - L.STEEP_START) / STEEP_LEN;
+  if (dist <= steepRange.start || dist >= steepRange.end) return 0;
+  const t = (dist - steepRange.start) / STEEP_LEN;
   return 0.5 * (1 - Math.cos(2 * Math.PI * t));
 }
 function steepDrop(dist){
-  if (dist <= L.STEEP_START) return 0;
-  if (dist >= L.STEEP_END) return STEEP_EXTRA * STEEP_LEN * 0.5;
-  const t = (dist - L.STEEP_START) / STEEP_LEN;
+  if (dist <= steepRange.start) return 0;
+  if (dist >= steepRange.end) return STEEP_EXTRA * STEEP_LEN * 0.5;
+  const t = (dist - steepRange.start) / STEEP_LEN;
   return STEEP_EXTRA * STEEP_LEN * (0.5 * t - Math.sin(2 * Math.PI * t) / (4 * Math.PI));
 }
 /* Rolling undulation INSIDE the corridor, baked into groundY itself
@@ -456,7 +513,7 @@ function steepDrop(dist){
    the goal so both ends stay calm. */
 function rollAt(dist){
   const fi = Math.min(1, Math.max(0, (dist - 150) / 350));
-  const fo = Math.min(1, Math.max(0, (COURSE_LEN - dist - 100) / 300));
+  const fo = Math.min(1, Math.max(0, (courseLen - dist - 100) / 300));
   const f = Math.min(fi, fo);
   if (f <= 0) return 0;
   const s = f * f * (3 - 2 * f);
@@ -482,14 +539,16 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87b7e8);
 scene.fog = new THREE.Fog(0xa8c8ee, 80, 380);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 500);
-scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a7296, 1.05));
+let peakMatsRef = null;
+const hemi = new THREE.HemisphereLight(0xdfefff, 0x5a7296, 1.05); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(30, 60, 20); scene.add(sun);
 /* Faceted low-poly mountain range + drifting low-poly clouds */
 const peaks = new THREE.Group();
 {
   /* fog:false with hand-picked atmospheric colours — scene fog was
      washing the range out to invisibility against the sky */
-  const peakMats = [0xd8e9fa, 0xaecdf0, 0xc4dcf5].map(c => new THREE.MeshLambertMaterial({ color: c, fog: false }));
+  peakMatsRef = [0xd8e9fa, 0xaecdf0, 0xc4dcf5].map(c => new THREE.MeshLambertMaterial({ color: c, fog: false }));
+  const peakMats = peakMatsRef;
   /* Sized for a portrait phone's narrow horizontal FOV (~±16°): the
      range is concentrated within ±120m at 245m ahead, anchored to the
      camera every frame so the summits always sit above the ridge line
@@ -523,6 +582,48 @@ const clouds = new THREE.Group();
     clouds.add(cl);
   }
   scene.add(clouds);
+}
+/* Night sky dressing (middle course): stars on a dome that follows
+   the camera, and a moon riding with the peaks group. */
+const stars = (() => {
+  const n = 520, pos = new Float32Array(n * 3), r = seededRand(4242);
+  for (let i = 0; i < n; i++) {
+    const th = r() * Math.PI * 2, ph = Math.acos(1 - r() * 0.95);
+    const rad = 430;
+    pos[i*3] = rad * Math.sin(ph) * Math.cos(th);
+    pos[i*3+1] = rad * Math.cos(ph) - 30;
+    pos[i*3+2] = rad * Math.sin(ph) * Math.sin(th);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const p = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.7, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.9, depthWrite: false }));
+  p.frustumCulled = false; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+const moon = new THREE.Group();
+{
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(13, 24), new THREE.MeshBasicMaterial({ color: 0xf6f9ff, fog: false }));
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(22, 24), new THREE.MeshBasicMaterial({ color: 0xbfd4ff, fog: false, transparent: true, opacity: 0.16, depthWrite: false }));
+  halo.position.z = -0.1;
+  moon.add(halo, disc);
+  moon.position.set(64, 112, -6);
+  moon.visible = false;
+  peaks.add(moon);
+}
+const PEAK_DAY = [0xd8e9fa, 0xaecdf0, 0xc4dcf5], PEAK_NIGHT = [0x27354f, 0x1d2a44, 0x222f4c];
+function applyTheme(night){
+  scene.background.set(night ? 0x0a1128 : 0x87b7e8);
+  scene.fog.color.set(night ? 0x141f3d : 0xa8c8ee);
+  hemi.intensity = night ? 0.5 : 1.05;
+  hemi.color.set(night ? 0x8fb4ff : 0xdfefff);
+  hemi.groundColor.set(night ? 0x1c2a4a : 0x5a7296);
+  sun.intensity = night ? 0.5 : 1.6;
+  sun.color.set(night ? 0xbfd4ff : 0xffffff);
+  if (peakMatsRef) peakMatsRef.forEach((m, i) => m.color.set(night ? PEAK_NIGHT[i] : PEAK_DAY[i]));
+  clouds.visible = !night;
+  stars.visible = night;
+  moon.visible = night;
 }
 
 const MAT = {
@@ -612,8 +713,9 @@ function layoutSegment(g, startDist){
     if (ch.userData.roll) ch.position.y = ch.userData.roll.baseY + (rollAt(mid - ch.userData.roll.zo) - rollAt(mid));
   }
   g.rotation.y = -Math.atan((centerX(mid + 5) - centerX(mid - 5)) / 10);
-  if (g.userData.builtFor !== startDist) {
-    g.userData.builtFor = startDist;
+  const builtKey = courseKey + ':' + startDist;
+  if (g.userData.builtFor !== builtKey) {
+    g.userData.builtFor = builtKey;
     const mesh = g.children[0];
     mesh.geometry.dispose();
     mesh.geometry = makeGroundGeo(mid);
@@ -641,18 +743,19 @@ function makeRock(){
    obstacles spanning the course with ONE ~9m gap. Gap centres are
    deterministic and consecutive rows differ by >=10m so the player
    must really steer. */
-const WALL_EVERY = 5, WALL_PHASE = 2;
+let wallEvery = 5;   /* chunks between wall rows (x40m); per course */
+const WALL_PHASE = 2;
 function isWallChunk(idx){
-  if (idx % WALL_EVERY !== WALL_PHASE) return false;
+  if (idx % wallEvery !== WALL_PHASE) return false;
   const start = idx * CHUNK;
-  if (start >= COURSE_LEN) return false;
+  if (start >= courseLen) return false;
   if (L.zoneTypeAt(start + CHUNK / 2) !== 'slalom') return false;
   const rowDist = start + CHUNK / 2;
   return !GATE_DISTANCES.some(gd => Math.abs(gd - rowDist) < 15);
 }
 function wallOrdinalForChunk(idx){
   let n = 0;
-  for (let j = WALL_PHASE; j < idx; j += WALL_EVERY) if (isWallChunk(j)) n++;
+  for (let j = WALL_PHASE; j < idx; j += wallEvery) if (isWallChunk(j)) n++;
   return n;
 }
 const wallGapCache = [];
@@ -702,7 +805,7 @@ function buildChunk(idx){
      next gate (the line itself stays clear). SLALOM: scattered singles. --- */
   if (zone === 'speed' || zone === 'steep') {
     for (const slotD of [start + 9, start + 29]) {
-      if (slotD >= COURSE_LEN) continue;
+      if (slotD >= courseLen) continue;
       const line = racingLineAt(slotD);
       for (const side of [-1, 1]) {
         if (rand() < 0.15) continue;              /* occasional gap in the avenue */
@@ -777,35 +880,58 @@ function layoutChunk(idx){
   return g;
 }
 
-/* Gates */
+/* Gates (rebuilt per course) */
 const gates = [];
-for (let i = 0; i < GATE_DISTANCES.length; i++) {
-  const dist = GATE_DISTANCES[i];
-  const off = GATE_OFF_MAP.get(dist);
-  const zone = GATE_ZONE_MAP.get(dist);
-  const g = new THREE.Group();
-  const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleR); p1.position.set(-4, 1.3, 0);
-  const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleB); p2.position.set(4, 1.3, 0);
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(8, 0.35, 0.08), new THREE.MeshBasicMaterial({ color: 0xffd94d }));
-  bar.position.y = 2.5;
-  g.add(p1, p2, bar);
-  g.position.set(centerX(dist) + off, groundY(dist), -dist);
-  scene.add(g);
-  gates.push({ dist, off, zone, group: g, passed: false });
+function buildGates(){
+  for (const gt of gates) scene.remove(gt.group);
+  gates.length = 0;
+  for (let i = 0; i < GATE_DISTANCES.length; i++) {
+    const dist = GATE_DISTANCES[i];
+    const off = GATE_OFF_MAP.get(dist);
+    const zone = GATE_ZONE_MAP.get(dist);
+    const g = new THREE.Group();
+    const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleR); p1.position.set(-4, 1.3, 0);
+    const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), MAT.poleB); p2.position.set(4, 1.3, 0);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(8, 0.35, 0.08), new THREE.MeshBasicMaterial({ color: 0xffd94d }));
+    bar.position.y = 2.5;
+    g.add(p1, p2, bar);
+    g.position.set(centerX(dist) + off, groundY(dist), -dist);
+    scene.add(g);
+    gates.push({ dist, off, zone, group: g, passed: false });
+  }
 }
-/* Goal lodge gate */
+/* Goal lodge gate (repositioned per course) */
+const lodge = new THREE.Group();
 {
-  const g = new THREE.Group();
   const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.4, 0.5), MAT.trunk); p1.position.set(-5, 2.2, 0);
   const p2 = p1.clone(); p2.position.x = 5;
   const roof = new THREE.Mesh(new THREE.ConeGeometry(8, 2.6, 4), new THREE.MeshLambertMaterial({ color: 0xb0483e }));
   roof.position.y = 5.4; roof.rotation.y = Math.PI / 4;
   const sign = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.7, 0.1), new THREE.MeshBasicMaterial({ color: 0xffd94d }));
   sign.position.y = 4.1;
-  g.add(p1, p2, roof, sign);
-  g.position.set(centerX(COURSE_LEN), groundY(COURSE_LEN), -COURSE_LEN);
-  scene.add(g);
+  lodge.add(p1, p2, roof, sign);
+  lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
+  scene.add(lodge);
 }
+/* Rebuild every course-dependent part of the world for the selected
+   course: layout (zones/steep/gate swing), gate data + objects,
+   obstacle chunks, the lodge position, and the day/night theme. */
+function rebuildWorld(){
+  L.setLayout(course.layout || null);
+  steepRange = course.layout && course.layout.steepStart !== undefined
+    ? { start: course.layout.steepStart, end: course.layout.steepEnd } : { start: 3600, end: 5400 };
+  STEEP_LEN = steepRange.end - steepRange.start;
+  courseLen = course.len;
+  wallEvery = course.wallEvery;
+  rebuildGateData();
+  buildGates();
+  for (const [ci, g] of chunks) { scene.remove(g); chunks.delete(ci); }
+  lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
+  applyTheme(!!course.night);
+  $('course-desc').textContent = (course.night ? '🌙 ナイトコース ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
+}
+worldReady = true;
+rebuildWorld();
 
 /* Player — concept A rider (seen from behind): red/black jacket,
    white helmet, backpack, graphic orange board. Built from primitives
@@ -1096,7 +1222,7 @@ function zoneBanner(title, sub, cls){
 }
 
 function resetRun(){
-  S.time = 20; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
+  S.time = course.startTime; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
   S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0; S.dmgT = 0;
@@ -1129,6 +1255,7 @@ function endRun(reason){
   $('r-dist').textContent = Math.floor(S.dist) + ' m';
   $('r-speed').textContent = Math.round(S.maxSpeedSeen * 3.6) + ' km/h';
   $('r-combo').textContent = '×' + S.maxCombo;
+  $('r-course').textContent = course.label;
   $('result').classList.remove('hidden');
 }
 function togglePause(){
@@ -1204,7 +1331,7 @@ function update(dt){
   /* --- forward --- */
   const prevDist = S.dist;
   S.dist += S.speed * dt;
-  if (S.dist >= COURSE_LEN) { S.score += Math.floor(S.time) * 100; endRun('goal'); return; }
+  if (S.dist >= courseLen) { S.score += Math.floor(S.time) * 100; endRun('goal'); return; }
 
   /* --- lateral --- */
   let latInput = 0;
@@ -1245,7 +1372,7 @@ function update(dt){
   if (g && prevDist < g.dist && S.dist >= g.dist) {
     g.passed = true;
     if (L.isGatePass(S.latX, g.off)) {
-      L.applyCheckpoint(S); sndCheckpoint(); popup('+4秒 ⛩ GATE!');
+      L.applyCheckpoint(S, course.gateSec); sndCheckpoint(); popup('+' + course.gateSec + '秒 ⛩ GATE!');
     } else {
       S.combo = 0; popup('GATE MISS');
     }
@@ -1411,6 +1538,7 @@ function render(){
   /* Background is camera-anchored: fixed geometry relative to the eye,
      so the range can never sink under the slope or leave the frame. */
   peaks.position.set(camera.position.x * 0.92 + centerX(S.dist) * 0.08, camera.position.y - 64, camera.position.z - 245);
+  stars.position.copy(camera.position);
   clouds.position.set(camera.position.x * 0.9, camera.position.y + 30, camera.position.z - 215);
   /* Obstacles the rider just squeezed past can swing into the chase
      camera and fill the whole screen with one flat green polygon for
@@ -1460,9 +1588,9 @@ function updateGateMarker(){
     tx = centerX(g.dist) + g.off; ty = groundY(g.dist) + 7; tz = -g.dist;
     label = 'GATE ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm';
   } else {
-    if (S.dist >= COURSE_LEN) { el.classList.add('hidden'); return; }
-    tx = centerX(COURSE_LEN); ty = groundY(COURSE_LEN) + 9; tz = -COURSE_LEN;
-    label = 'GOAL ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
+    if (S.dist >= courseLen) { el.classList.add('hidden'); return; }
+    tx = centerX(courseLen); ty = groundY(courseLen) + 9; tz = -courseLen;
+    label = 'GOAL ' + Math.max(0, Math.ceil(courseLen - S.dist)) + 'm';
   }
   _mv.set(tx, ty, tz);
   _mw.copy(_mv).applyMatrix4(camera.matrixWorldInverse);
@@ -1499,8 +1627,8 @@ function renderHUD(){
   hz.classList.toggle('slalom', zone === 'slalom');
   hz.classList.toggle('steep', zone === 'steep');
   const g = nextGate();
-  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : g.zone === 'steep' ? 'STEEP' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +4秒';
-  else $('next-val').textContent = '次は GOAL ・ ' + Math.max(0, Math.ceil(COURSE_LEN - S.dist)) + 'm';
+  if (g) $('next-val').textContent = '次は GATE ' + (GATE_DISTANCES.indexOf(g.dist) + 1) + ' ・ ' + (g.zone === 'speed' ? 'SPEED' : g.zone === 'steep' ? 'STEEP' : 'SLALOM') + ' ・ ' + L.gateSideLabel(g.off) + ' ・ ' + Math.max(0, Math.ceil(g.dist - S.dist)) + 'm ・ +' + course.gateSec + '秒';
+  else $('next-val').textContent = '次は GOAL ・ ' + Math.max(0, Math.ceil(courseLen - S.dist)) + 'm';
   $('hud-speed').innerHTML = Math.round(S.speed * 3.6) + '<small> km/h</small>';
   $('burst-bar').style.width = (S.burstTime > 0 ? 100 : S.burst) + '%';
   const bl = $('burst-label');
