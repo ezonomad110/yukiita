@@ -177,7 +177,7 @@
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <button class="sub-btn" id="btn-sound">🔊 SOUND ON</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.8</p>
+  <p class="ver">v4.9</p>
 </div>
 
 <!-- Result -->
@@ -939,8 +939,10 @@ function buildChunk(idx){
       const line = racingLineAt(slotD);
       for (const side of [-1, 1]) {
         if (rand() < 0.15) continue;              /* occasional gap in the avenue */
-        /* the steep zone runs much faster, so its avenue stands wider */
-        const off = line + side * (zone === 'steep' ? 9 + rand() * 2 : 6 + rand() * 2.5);
+        /* the steep zone runs much faster, so its avenue stands wider.
+           Gate-run style pushes the avenue well clear of the gate
+           route (user call): backdrop only, nothing inside the line. */
+        const off = line + side * (styleKey === 'gates' ? 13 + rand() * 4 : zone === 'steep' ? 9 + rand() * 2 : 6 + rand() * 2.5);
         if (off < -23 || off > 23) continue;
         addItem(slotD + rand() * 4 - 2, Math.round(off * 10) / 10, makeTree());
       }
