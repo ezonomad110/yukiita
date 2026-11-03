@@ -177,7 +177,7 @@
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
   <button class="sub-btn" id="btn-sound">🔊 SOUND ON</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.7</p>
+  <p class="ver">v4.8</p>
 </div>
 
 <!-- Result -->
@@ -409,13 +409,13 @@ try { const m = localStorage.getItem('yukiita-mode'); if (m && MODES[m]) modeKey
 let mode = MODES[modeKey];
 /* Play style (user call, 2026-11-03): 'gates' is a gate-run — no
    obstacle trees/rocks/walls at all (avenue and scenery trees stay,
-   ghosted, purely as speed backdrop), gates every ~80m swinging
-   wide, +0.6s per pass, and a streak counter for consecutive
+   ghosted, purely as speed backdrop), gates every ~160m swinging
+   wide, +1.2s per pass, and a streak counter for consecutive
    passes. The course (length/layout/start time) still applies. */
 const STYLES = { normal: { label: '通常' }, gates: { label: 'ゲートラン' } };
 let styleKey = 'normal';
 try { const st = localStorage.getItem('yukiita-style'); if (st && STYLES[st]) styleKey = st; } catch (e) {}
-const GATE_RUN_BONUS = 0.6, GATE_RUN_EVERY = 80;
+const GATE_RUN_BONUS = 1.2, GATE_RUN_EVERY = 160;
 function effGateSec(){ return styleKey === 'gates' ? GATE_RUN_BONUS : course.gateSec; }
 function setStyle(k){
   styleKey = k;
@@ -526,7 +526,7 @@ function rebuildGateData(){
   GATE_DISTANCES = [];
   GATE_OFF_MAP.clear(); GATE_ZONE_MAP.clear();
   if (styleKey === 'gates') {
-    /* gate run: a gate every ~80m, swinging in a wide fixed pattern */
+    /* gate run: a gate every ~160m, swinging in a wide fixed pattern */
     const PAT = [8, -8, 11, -11, 5, -5, 10, -10];
     let i = 0;
     for (let d = 300; d < courseLen - 120; d += GATE_RUN_EVERY, i++) {
