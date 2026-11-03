@@ -28,11 +28,11 @@
   .sub-btn { margin-top:14px; background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.35);
     font-size:14px; padding:10px 22px; border-radius:999px; cursor:pointer; }
   .sub-btn:active { transform:scale(.97); }
-  #course-row, #mode-row { display:flex; gap:10px; justify-content:center; margin-top:20px; }
+  #course-row, #mode-row, #style-row { display:flex; gap:10px; justify-content:center; margin-top:20px; }
   #mode-row { margin-top:16px; }
-  .course-btn, .mode-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
+  .course-btn, .mode-btn, .style-btn { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.35); font-size:16px; font-weight:700;
     padding:10px 26px; border-radius:999px; cursor:pointer; }
-  .course-btn.sel, .mode-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
+  .course-btn.sel, .mode-btn.sel, .style-btn.sel { background:#ffd94d; color:#14213d; border-color:#ffd94d; }
   .mode-btn.neon { border-color:#ff4fd8; color:#ffb7ef; text-shadow:0 0 8px rgba(255,79,216,.8); box-shadow:0 0 10px rgba(255,79,216,.35), inset 0 0 8px rgba(64,224,255,.25); }
   .mode-btn.neon.sel { background:linear-gradient(90deg,#ff4fd8,#8a5cff,#40e0ff); color:#fff; border-color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45); }
   .row-label { font-size:11px; letter-spacing:.35em; opacity:.65; margin-top:18px; }
@@ -160,6 +160,11 @@
     <button class="mode-btn" data-mode="night">🌙 夜</button>
     <button class="mode-btn neon" data-mode="space">🚀 宇宙</button>
   </div>
+  <p class="row-label">スタイル</p>
+  <div id="style-row">
+    <button class="style-btn" data-style="normal">通常</button>
+    <button class="style-btn" data-style="gates">⛩ ゲートラン</button>
+  </div>
   <p class="row-label">コース</p>
   <div id="course-row">
     <button class="course-btn" data-course="easy">初級</button>
@@ -170,8 +175,9 @@
   <div class="best">BEST <b id="best-val">0</b></div>
   <button class="big-btn" id="btn-start">START</button>
   <button class="sub-btn" id="btn-tune-title">⚙ 調整モード</button>
+  <button class="sub-btn" id="btn-sound">🔊 SOUND ON</button>
   <p class="howto">←→ / ドラッグ： カービング　↑長押し： タック（加速）<br>↓： ブレーキ　Space： ジャンプ（ゲージ満タン時はBURST）　P： ポーズ</p>
-  <p class="ver">v4.5</p>
+  <p class="ver">v4.7</p>
 </div>
 
 <!-- Result -->
@@ -401,6 +407,23 @@ const MODES = {
 let modeKey = 'snow';
 try { const m = localStorage.getItem('yukiita-mode'); if (m && MODES[m]) modeKey = m; } catch (e) {}
 let mode = MODES[modeKey];
+/* Play style (user call, 2026-11-03): 'gates' is a gate-run — no
+   obstacle trees/rocks/walls at all (avenue and scenery trees stay,
+   ghosted, purely as speed backdrop), gates every ~80m swinging
+   wide, +0.6s per pass, and a streak counter for consecutive
+   passes. The course (length/layout/start time) still applies. */
+const STYLES = { normal: { label: '通常' }, gates: { label: 'ゲートラン' } };
+let styleKey = 'normal';
+try { const st = localStorage.getItem('yukiita-style'); if (st && STYLES[st]) styleKey = st; } catch (e) {}
+const GATE_RUN_BONUS = 0.6, GATE_RUN_EVERY = 80;
+function effGateSec(){ return styleKey === 'gates' ? GATE_RUN_BONUS : course.gateSec; }
+function setStyle(k){
+  styleKey = k;
+  try { localStorage.setItem('yukiita-style', k); } catch (e) {}
+  document.querySelectorAll('.style-btn').forEach(b => b.classList.toggle('sel', b.dataset.style === k));
+  if (typeof course !== 'undefined') $('mission-sec').textContent = 'ゲート通過で +' + effGateSec() + '秒＆ハート回復。';
+  if (worldReady) rebuildWorld();
+}
 /* Courses: the v3.9 balance is the beginner course (user call,
    after a 29-seconds-to-spare clear). The middle course is a
    DIFFERENT mountain: 12,000m, sections reversed, the steep stretch
@@ -430,13 +453,15 @@ function setCourse(k){
   courseKey = k; course = COURSES[k];
   try { localStorage.setItem('yukiita-course', k); } catch (e) {}
   document.querySelectorAll('.course-btn').forEach(b => b.classList.toggle('sel', b.dataset.course === k));
-  $('mission-sec').textContent = 'ゲート通過で +' + course.gateSec + '秒＆ハート回復。';
+  $('mission-sec').textContent = 'ゲート通過で +' + effGateSec() + '秒＆ハート回復。';
   updateTitleLoc();
   if (worldReady) rebuildWorld();
 }
 document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+document.querySelectorAll('.style-btn').forEach(b => b.addEventListener('click', () => setStyle(b.dataset.style)));
 document.querySelectorAll('.course-btn').forEach(b => b.addEventListener('click', () => setCourse(b.dataset.course)));
 setMode(modeKey);
+setStyle(styleKey);
 setCourse(courseKey);
 function saveTuning(){ try { localStorage.setItem('yukiita_tuning', JSON.stringify(tuning)); } catch(e) {} }
 
@@ -499,6 +524,18 @@ const GATE_OFF_MAP = new Map();
 const GATE_ZONE_MAP = new Map();
 function rebuildGateData(){
   GATE_DISTANCES = [];
+  GATE_OFF_MAP.clear(); GATE_ZONE_MAP.clear();
+  if (styleKey === 'gates') {
+    /* gate run: a gate every ~80m, swinging in a wide fixed pattern */
+    const PAT = [8, -8, 11, -11, 5, -5, 10, -10];
+    let i = 0;
+    for (let d = 300; d < courseLen - 120; d += GATE_RUN_EVERY, i++) {
+      GATE_DISTANCES.push(d);
+      GATE_OFF_MAP.set(d, PAT[i % PAT.length]);
+      GATE_ZONE_MAP.set(d, 'speed');
+    }
+    return;
+  }
   { let d = 400; let i = 0; while (d < courseLen - 120) { GATE_DISTANCES.push(d); d += 350 + ((i * 53) % 100); i++; } }
   GATE_OFF_MAP.clear(); GATE_ZONE_MAP.clear();
   let sp = 0, sl = 0;
@@ -877,15 +914,16 @@ function buildChunk(idx){
     obj.userData.dist = dist; obj.userData.off = off;
     obj.userData.passed = false;
     /* powder zone: trees are scenery only — they sell the speed but
-       never block the ride (gates stay live, see collision loop) */
-    obj.userData.ghost = L.zoneTypeAt(dist) === 'steep';
+       never block the ride (gates stay live, see collision loop).
+       Gate-run style ghosts EVERYTHING: trees become pure backdrop. */
+    obj.userData.ghost = styleKey === 'gates' || L.zoneTypeAt(dist) === 'steep';
     g.add(obj); items.push(obj);
   }
   /* --- section type for this chunk (from its mid distance) --- */
   const zone = L.zoneTypeAt(start + CHUNK / 2);
   /* --- wall row (slalom zones only, deterministic per chunk) --- */
   let hasWall = false, rowDist = start + CHUNK / 2, gapOff = 0;
-  if (isWallChunk(idx)) {
+  if (styleKey !== 'gates' && isWallChunk(idx)) {
     hasWall = true;
     gapOff = wallGapOrdinal(wallOrdinalForChunk(idx));
     for (let off = -22; off <= 22.01; off += 5.5) {
@@ -895,7 +933,7 @@ function buildChunk(idx){
   }
   /* --- SPEED zones: an avenue of trees flanks the racing line to the
      next gate (the line itself stays clear). SLALOM: scattered singles. --- */
-  if (zone === 'speed' || zone === 'steep') {
+  if (zone === 'speed' || zone === 'steep' || styleKey === 'gates') {
     for (const slotD of [start + 9, start + 29]) {
       if (slotD >= courseLen) continue;
       const line = racingLineAt(slotD);
@@ -908,7 +946,7 @@ function buildChunk(idx){
       }
     }
   }
-  const n = (zone === 'speed' || zone === 'steep') ? 0 : 2 + Math.floor(rand() * 3);
+  const n = (styleKey === 'gates' || zone === 'speed' || zone === 'steep') ? 0 : 2 + Math.floor(rand() * 3);
   for (let i = 0; i < n; i++) {
     const dist = start + 6 + rand() * (CHUNK - 12);
     let off = -22 + rand() * 44;
@@ -1020,7 +1058,7 @@ function rebuildWorld(){
   for (const [ci, g] of chunks) { scene.remove(g); chunks.delete(ci); }
   lodge.position.set(centerX(courseLen), groundY(courseLen), -courseLen);
   applyTheme(mode.theme);
-  $('course-desc').textContent = (mode.theme === 'space' ? '🚀 ネオンスペース ／ ' : mode.theme === 'night' ? '🌙 ナイト ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + course.gateSec + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * course.gateSec) + '秒）';
+  $('course-desc').textContent = (mode.theme === 'space' ? '🚀 ネオンスペース ／ ' : mode.theme === 'night' ? '🌙 ナイト ／ ' : '') + (styleKey === 'gates' ? '⛩ ゲートラン（障害物なし） ／ ' : '') + '全長 ' + course.len.toLocaleString() + 'm ／ 初期 ' + course.startTime + '秒 ／ ゲート +' + effGateSec() + '秒（全' + GATE_DISTANCES.length + 'ゲートで最大 ' + (course.startTime + GATE_DISTANCES.length * effGateSec()).toFixed(0) + '秒）';
 }
 worldReady = true;
 rebuildWorld();
@@ -1350,7 +1388,7 @@ function zoneBanner(title, sub, cls){
 }
 
 function resetRun(){
-  S.time = course.startTime; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0;
+  S.time = course.startTime; S.hearts = 3; S.score = 0; S.combo = 0; S.maxCombo = 0; S.burst = 0; S.gateStreak = 0;
   S.dist = 0; S.speed = 8; S.maxSpeedSeen = 0;
   S.latX = 0; S.latV = 0; S.jumpY = 0; S.jumpV = 0; S.grounded = true;
   S.burstTime = 0; S.invulnTime = 0; S.runTime = 0; S.hitFlash = 0; S.dmgT = 0;
@@ -1500,9 +1538,16 @@ function update(dt){
   if (g && prevDist < g.dist && S.dist >= g.dist) {
     g.passed = true;
     if (L.isGatePass(S.latX, g.off)) {
-      L.applyCheckpoint(S, course.gateSec); sndCheckpoint(); popup('+' + course.gateSec + '秒 ⛩ GATE!');
+      if (styleKey === 'gates') {
+        L.applyCheckpoint(S, GATE_RUN_BONUS); sndCheckpoint();
+        S.gateStreak = (S.gateStreak || 0) + 1;
+        S.score += 50 * S.gateStreak;
+        popup(S.gateStreak >= 2 ? '⛩ ' + S.gateStreak + '連続！ +' + GATE_RUN_BONUS + '秒' : '+' + GATE_RUN_BONUS + '秒 ⛩ GATE!');
+      } else {
+        L.applyCheckpoint(S, course.gateSec); sndCheckpoint(); popup('+' + course.gateSec + '秒 ⛩ GATE!');
+      }
     } else {
-      S.combo = 0; popup('GATE MISS');
+      S.combo = 0; S.gateStreak = 0; popup('GATE MISS');
     }
   }
 
@@ -1766,6 +1811,174 @@ function renderHUD(){
   $('btn-burst').classList.toggle('hidden', !(BURST_UI && S.mode === 'run' && S.burst >= 100 && S.burstTime <= 0));
 }
 
+/* ================= BGM (Web Audio synth, no audio files) =================
+   "Powder Glide": a floating chill loop for the ride — Am9 - Fmaj7 -
+   Cmaj7 - Gadd9 pads, a plucked arpeggio, soft kick and bass, delay
+   sparkle, and a band-passed wind bed whose loudness and pitch track
+   your speed, so carving faster literally raises the wind. */
+const BGM = (() => {
+  const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+  let ctx = null, master = null, delayIn = null, windGain = null, windFilter = null, noiseBuf = null;
+  let playing = false, timer = null, step = 0, nextT = 0;
+  /* BGM ships default-OFF for now (user call, 2026-11-03): the track
+     direction is still undecided, so it stays silent until the
+     player turns SOUND on from the title screen. */
+  let enabled = false;
+  try { enabled = localStorage.getItem('yukiita-sound') === 'on'; } catch (e) {}
+  const BPM = 114, SPB = 60 / BPM / 2;   /* seconds per eighth note */
+  const CHORDS = [
+    { bass: 45, tones: [57, 60, 64, 71] },   /* Am9 */
+    { bass: 41, tones: [53, 57, 60, 65] },   /* Fmaj7 */
+    { bass: 48, tones: [55, 60, 64, 67] },   /* Cmaj7 */
+    { bass: 43, tones: [55, 59, 62, 69] },   /* Gadd9 */
+  ];
+  const ARP = [0, 1, 2, 3, 2, 3, 1, 2, 0, 2, 1, 3, 2, 1, 3, 2];
+  function init(){
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18; comp.ratio.value = 6;
+    comp.connect(ctx.destination);
+    master = ctx.createGain(); master.gain.value = 0.55; master.connect(comp);
+    /* dotted-eighth feedback delay for the sparkle/pluck space */
+    delayIn = ctx.createGain();
+    const dly = ctx.createDelay(1); dly.delayTime.value = 0.39;
+    const fb = ctx.createGain(); fb.gain.value = 0.34;
+    const wetF = ctx.createBiquadFilter(); wetF.type = 'lowpass'; wetF.frequency.value = 1600;
+    const wet = ctx.createGain(); wet.gain.value = 0.32;
+    delayIn.connect(dly); dly.connect(fb); fb.connect(dly);
+    dly.connect(wetF); wetF.connect(wet); wet.connect(master);
+    /* wind bed: looped noise through a wandering band-pass */
+    const len = 2 * ctx.sampleRate, buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    noiseBuf = buf;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    windFilter = ctx.createBiquadFilter(); windFilter.type = 'bandpass'; windFilter.frequency.value = 480; windFilter.Q.value = 0.55;
+    windGain = ctx.createGain(); windGain.gain.value = 0.012;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 150;
+    lfo.connect(lfoG); lfoG.connect(windFilter.frequency);
+    src.connect(windFilter); windFilter.connect(windGain); windGain.connect(master);
+    src.start(); lfo.start();
+  }
+  function pad(chd, t){
+    const dur = 16 * SPB;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 850; f.Q.value = 0.3;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.045, t + 1.4);
+    g.gain.setValueAtTime(0.045, t + dur - 1.2);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.4);
+    f.connect(g); g.connect(master);
+    for (const m of chd.tones) {
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = mf(m);
+      o.detune.value = Math.random() * 8 - 4;
+      o.connect(f); o.start(t); o.stop(t + dur + 0.5);
+    }
+  }
+  function pluck(m, t, vol){
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = mf(m);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.34);
+    o.connect(g); g.connect(master); g.connect(delayIn);
+    o.start(t); o.stop(t + 0.4);
+  }
+  function bassN(m, t, vol, dur){
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = mf(m);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function kick(t){
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(130, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.11, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.13);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + 0.15);
+  }
+  function sparkle(m, t){
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = mf(m);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.035, t);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 0.5);
+    o.connect(g); g.connect(master); g.connect(delayIn);
+    o.start(t); o.stop(t + 0.55);
+  }
+  function hat(t){
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf;
+    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7200;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.045);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t, Math.random() * 1.5, 0.06); src.stop(t + 0.06);
+  }
+  function scheduleStep(s, t){
+    const chd = CHORDS[Math.floor(s / 16) % 4], local = s % 16;
+    if (local === 0) pad(chd, t);
+    if (local % 8 === 0) bassN(chd.bass, t, 0.15, 1.9);
+    if (local === 12) bassN(chd.bass + 7, t, 0.07, 1.1);
+    if (local % 2 === 1) bassN(chd.bass, t, 0.05, 0.24);   /* driving eighth pulse */
+    if (local % 2 === 0) kick(t); else hat(t);
+    let note = chd.tones[ARP[local]];
+    if (local === 14 && Math.floor(s / 16) % 2 === 1) note += 12;
+    pluck(note, t, local % 4 === 0 ? 0.12 : 0.085);
+    pluck(chd.tones[ARP[(local + 1) % 16]], t + SPB / 2, 0.042);   /* 16th ghost note */
+    if (Math.random() < 0.16) sparkle(chd.tones[Math.floor(Math.random() * 4)] + 24, t + SPB / 2);
+  }
+  function tick(){
+    while (nextT < ctx.currentTime + 0.14) { scheduleStep(step, nextT); nextT += SPB; step++; }
+  }
+  function start(){
+    if (!enabled) return;
+    init();
+    if (ctx.state === 'suspended') ctx.resume();
+    if (playing) return;
+    playing = true; step = 0; nextT = ctx.currentTime + 0.06;
+    timer = setInterval(tick, 27);
+  }
+  function stop(){
+    playing = false;
+    if (timer) clearInterval(timer);
+    timer = null;
+    if (ctx) ctx.suspend();
+  }
+  function syncBtn(){
+    const b = document.getElementById('btn-sound');
+    if (b) b.textContent = enabled ? '🔊 SOUND ON' : '🔇 SOUND OFF';
+  }
+  return {
+    start, stop, syncBtn,
+    get enabled(){ return enabled; },
+    setEnabled(v){
+      enabled = v;
+      try { localStorage.setItem('yukiita-sound', v ? 'on' : 'off'); } catch (e) {}
+      syncBtn();
+    },
+    userGesture(){ if (enabled) start(); },
+    setWind(r){
+      if (!ctx || !windGain) return;
+      const t = ctx.currentTime;
+      windGain.gain.setTargetAtTime(0.012 + r * 0.05, t, 0.4);
+      windFilter.frequency.setTargetAtTime(420 + r * 750, t, 0.4);
+    }
+  };
+})();
+BGM.syncBtn();
+window.addEventListener('pointerdown', () => BGM.userGesture(), { passive: true });
+$('btn-sound').addEventListener('click', () => {
+  BGM.setEnabled(!BGM.enabled);
+  if (BGM.enabled) BGM.start(); else BGM.stop();
+});
+
 /* ================= Main loop (dt-based) ================= */
 let last = performance.now();
 function loop(now){
@@ -1773,6 +1986,7 @@ function loop(now){
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.05) dt = 0.05;                 /* clamp tab-switch jumps */
   if (S.mode !== 'pause') { update(dt); updateSpray(dt); updatePowder(dt); updateWarp(dt); }
+  BGM.setWind(S.mode === 'run' ? Math.min(1, S.speed / tuning.maxSpeed) : 0.15);
   render(); renderHUD();
 }
 requestAnimationFrame(loop);
